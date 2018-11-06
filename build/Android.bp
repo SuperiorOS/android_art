@@ -224,18 +224,6 @@ art_module_art_global_defaults {
         // method InstructionSetFeatures::FromCppDefines(). Since invoking dex2oat directly
         // does not pick up these flags, cross-compiling from a x86/x86_64 host to a
         // x86/x86_64 target should not be affected.
-        linux_x86: {
-            cflags: [
-                "-msse4.2",
-                "-mpopcnt",
-            ],
-        },
-        linux_x86_64: {
-            cflags: [
-                "-msse4.2",
-                "-mpopcnt",
-            ],
-        },
     },
 
     codegen: {
