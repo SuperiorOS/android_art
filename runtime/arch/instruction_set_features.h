@@ -20,6 +20,7 @@
 #include <iosfwd>
 #include <memory>
 #include <vector>
+#include <string>
 
 #include "arch/instruction_set.h"
 #include "base/macros.h"
@@ -32,7 +33,7 @@ class Riscv64InstructionSetFeatures;
 class X86InstructionSetFeatures;
 class X86_64InstructionSetFeatures;
 
-// Abstraction used to describe features of a different instruction sets.
+// Abstraction used to describe features of different instruction sets.
 class InstructionSetFeatures {
  public:
   // Process a CPU variant string for the given ISA and create an InstructionSetFeatures.
@@ -64,7 +65,7 @@ class InstructionSetFeatures {
   //
   // Return: a set of detected features or nullptr if runtime detection is not
   //         supported on a target.
-  static std::unique_ptr<const InstructionSetFeatures> FromRuntimeDetection();
+  EXPORT static std::unique_ptr<const InstructionSetFeatures> FromRuntimeDetection();
 
   // Process /proc/cpuinfo and use kRuntimeISA to produce InstructionSetFeatures.
   static std::unique_ptr<const InstructionSetFeatures> FromCpuInfo();
