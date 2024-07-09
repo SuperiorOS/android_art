@@ -22,7 +22,7 @@
 #include "mirror/object-inl.h"
 #include "obj_ptr-inl.h"
 
-namespace art {
+namespace art HIDDEN {
 
 inline bool VerifyClassClass(ObjPtr<mirror::Class> c) {
   if (UNLIKELY(c == nullptr)) {

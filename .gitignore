@@ -4,3 +4,4 @@ JIT_ART
 **/*.iml
 **/*.pyc
 **/*.swn
+tools/boot.out

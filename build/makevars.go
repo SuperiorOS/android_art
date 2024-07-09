@@ -56,7 +56,7 @@ func makeVarsProvider(ctx android.MakeVarsContext) {
 	sort.Strings(testNames)
 
 	for _, name := range testNames {
-		ctx.Strict("ART_TEST_LIST_"+name, strings.Join(testMap[name], " "))
+		ctx.Strict("ART_TEST_LIST_"+name, strings.Join(android.FirstUniqueStrings(testMap[name]), " "))
 	}
 
 	// Create list of copy commands to install the content of the testcases directory.

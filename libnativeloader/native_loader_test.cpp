@@ -564,7 +564,8 @@ jni com_android_bar libbar.so:libbar2.so
   public com_android_bar libpublic.so
 )";
 
-  auto jni_libs = ParseApexLibrariesConfig(file_content, "jni");
+  Result<std::map<std::string, std::string>> jni_libs =
+      ParseApexLibrariesConfig(file_content, "jni");
   ASSERT_RESULT_OK(jni_libs);
   std::map<std::string, std::string> expected_jni_libs {
     {"com_android_foo", "libfoo.so"},
@@ -572,7 +573,8 @@ jni com_android_bar libbar.so:libbar2.so
   };
   ASSERT_EQ(expected_jni_libs, *jni_libs);
 
-  auto public_libs = ParseApexLibrariesConfig(file_content, "public");
+  Result<std::map<std::string, std::string>> public_libs =
+      ParseApexLibrariesConfig(file_content, "public");
   ASSERT_RESULT_OK(public_libs);
   std::map<std::string, std::string> expected_public_libs {
     {"com_android_bar", "libpublic.so"},
@@ -586,7 +588,7 @@ jni com_android_foo libfoo
 # missing <library list>
 jni com_android_bar
 )";
-  auto result = ParseApexLibrariesConfig(file_content, "jni");
+  Result<std::map<std::string, std::string>> result = ParseApexLibrariesConfig(file_content, "jni");
   ASSERT_FALSE(result.ok());
   ASSERT_EQ("Malformed line \"jni com_android_bar\"", result.error().message());
 }
@@ -598,7 +600,7 @@ public apex2 lib
 # unknown tag
 unknown com_android_foo libfoo
 )";
-  auto result = ParseApexLibrariesConfig(file_content, "jni");
+  Result<std::map<std::string, std::string>> result = ParseApexLibrariesConfig(file_content, "jni");
   ASSERT_FALSE(result.ok());
   ASSERT_EQ("Invalid tag \"unknown com_android_foo libfoo\"", result.error().message());
 }
@@ -608,7 +610,7 @@ TEST(NativeLoaderApexLibrariesConfigParser, RejectInvalidApexNamespace) {
 # apex linker namespace should be mangled ('.' -> '_')
 jni com.android.foo lib
 )";
-  auto result = ParseApexLibrariesConfig(file_content, "jni");
+  Result<std::map<std::string, std::string>> result = ParseApexLibrariesConfig(file_content, "jni");
   ASSERT_FALSE(result.ok());
   ASSERT_EQ("Invalid apex_namespace \"jni com.android.foo lib\"", result.error().message());
 }
@@ -618,7 +620,7 @@ TEST(NativeLoaderApexLibrariesConfigParser, RejectInvalidLibraryList) {
 # library list is ":" separated list of filenames
 jni com_android_foo lib64/libfoo.so
 )";
-  auto result = ParseApexLibrariesConfig(file_content, "jni");
+  Result<std::map<std::string, std::string>> result = ParseApexLibrariesConfig(file_content, "jni");
   ASSERT_FALSE(result.ok());
   ASSERT_EQ("Invalid library_list \"jni com_android_foo lib64/libfoo.so\"", result.error().message());
 }

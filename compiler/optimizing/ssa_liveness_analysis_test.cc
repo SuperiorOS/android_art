@@ -31,7 +31,6 @@ namespace art HIDDEN {
 class SsaLivenessAnalysisTest : public OptimizingUnitTest {
  protected:
   void SetUp() override {
-    TEST_SETUP_DISABLED_FOR_RISCV64();
     OptimizingUnitTest::SetUp();
     graph_ = CreateGraph();
     compiler_options_ = CommonCompilerTest::CreateCompilerOptions(kRuntimeISA, "default");
@@ -41,11 +40,6 @@ class SsaLivenessAnalysisTest : public OptimizingUnitTest {
     entry_ = new (GetAllocator()) HBasicBlock(graph_);
     graph_->AddBlock(entry_);
     graph_->SetEntryBlock(entry_);
-  }
-
-  void TearDown() override {
-    TEST_TEARDOWN_DISABLED_FOR_RISCV64();
-    OptimizingUnitTest::TearDown();
   }
 
  protected:
@@ -64,7 +58,6 @@ class SsaLivenessAnalysisTest : public OptimizingUnitTest {
 };
 
 TEST_F(SsaLivenessAnalysisTest, TestReturnArg) {
-  TEST_DISABLED_FOR_RISCV64();
   HInstruction* arg = new (GetAllocator()) HParameterValue(
       graph_->GetDexFile(), dex::TypeIndex(0), 0, DataType::Type::kInt32);
   entry_->AddInstruction(arg);
@@ -85,7 +78,6 @@ TEST_F(SsaLivenessAnalysisTest, TestReturnArg) {
 }
 
 TEST_F(SsaLivenessAnalysisTest, TestAput) {
-  TEST_DISABLED_FOR_RISCV64();
   HInstruction* array = new (GetAllocator()) HParameterValue(
       graph_->GetDexFile(), dex::TypeIndex(0), 0, DataType::Type::kReference);
   HInstruction* index = new (GetAllocator()) HParameterValue(
@@ -155,7 +147,6 @@ TEST_F(SsaLivenessAnalysisTest, TestAput) {
 }
 
 TEST_F(SsaLivenessAnalysisTest, TestDeoptimize) {
-  TEST_DISABLED_FOR_RISCV64();
   HInstruction* array = new (GetAllocator()) HParameterValue(
       graph_->GetDexFile(), dex::TypeIndex(0), 0, DataType::Type::kReference);
   HInstruction* index = new (GetAllocator()) HParameterValue(

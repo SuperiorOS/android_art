@@ -30,6 +30,7 @@
 #include <jni.h>
 #include <nativebridge/native_bridge.h>
 
+#include "base/casts.h"
 #include "base/macros.h"
 
 struct NativeBridgeMethod {
@@ -309,7 +310,9 @@ class SignalHandlerTestStatus {
 
   void AssertState(TestStatus expected) {
     if (state_ != expected) {
-      printf("ERROR: unexpected state, was %d, expected %d\n", state_, expected);
+      printf("ERROR: unexpected state, was %d, expected %d\n",
+             art::enum_cast<int>(state_),
+             art::enum_cast<int>(expected));
     }
   }
 };

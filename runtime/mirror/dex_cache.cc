@@ -22,7 +22,7 @@
 #include "gc/heap.h"
 #include "jit/profile_saver.h"
 #include "linear_alloc.h"
-#include "oat_file.h"
+#include "oat/oat_file.h"
 #include "object-inl.h"
 #include "object.h"
 #include "object_array-inl.h"
@@ -33,7 +33,7 @@
 #include "thread.h"
 #include "write_barrier.h"
 
-namespace art {
+namespace art HIDDEN {
 namespace mirror {
 
 // Whether to allocate full dex cache arrays during startup. Currently disabled

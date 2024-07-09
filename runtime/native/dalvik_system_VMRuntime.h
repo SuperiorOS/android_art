@@ -19,9 +19,17 @@
 
 #include <jni.h>
 
-namespace art {
+#include "base/macros.h"
 
-void register_dalvik_system_VMRuntime(JNIEnv* env);
+namespace art HIDDEN {
+
+// TODO(260881207): register_dalvik_system_VMRuntime should be HIDDEN,
+// but some apps fail to launch (e.g. b/319255249).
+// The function is still exported for now, but it does a targetSdk check
+// and aborts for SdkVersion after U. Libart code should use
+// `real_register...` until exported function is removed.
+EXPORT void register_dalvik_system_VMRuntime(JNIEnv* env);
+void real_register_dalvik_system_VMRuntime(JNIEnv* env);
 
 }  // namespace art
 

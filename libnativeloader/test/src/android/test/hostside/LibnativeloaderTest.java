@@ -278,7 +278,10 @@ public class LibnativeloaderTest extends BaseHostJUnit4Test {
         void pushPrivateLibs(ZipFile libApk) throws Exception {
             // Push the libraries once for each test. Since we cannot unload them, we need a fresh
             // never-before-loaded library in each loadLibrary call.
-            for (int i = 1; i <= 6; ++i) {
+            //
+            // Remember to update testPrivateLibsExist in TestUtils.java when
+            // the number of libraries changes.
+            for (int i = 1; i <= 10; ++i) {
                 pushNativeTestLib(libApk, "libsystem_testlib.so",
                         "/system/${LIB}/libsystem_private" + i + ".so");
                 pushNativeTestLib(libApk, "libsystem_testlib.so",

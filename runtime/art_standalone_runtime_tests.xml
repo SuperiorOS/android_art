@@ -81,8 +81,6 @@
     <test class="com.android.tradefed.testtype.GTest" >
         <option name="native-test-device-path" value="/data/local/tmp/art_standalone_runtime_tests" />
         <option name="module-name" value="art_standalone_runtime_tests" />
-        <option name="ld-library-path-32" value="/apex/com.android.art/lib" />
-        <option name="ld-library-path-64" value="/apex/com.android.art/lib64" />
 
         <!-- The following tests from `art_standalone_runtime_tests` are currently failing
              (observed on `aosp_cf_x86_64_phone-userdebug`).

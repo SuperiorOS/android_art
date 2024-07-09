@@ -35,7 +35,7 @@
 #include "mirror/dex_cache.h"
 #include "obj_ptr.h"
 
-namespace art {
+namespace art HIDDEN {
 
 class ArtField;
 class ArtMethod;
@@ -98,7 +98,7 @@ enum ReflectionSourceType {
   kSourceDexCacheResolvedField,
   kSourceMiscInternal,
 };
-std::ostream& operator<<(std::ostream& os, ReflectionSourceType type);
+EXPORT std::ostream& operator<<(std::ostream& os, ReflectionSourceType type);
 
 class ReflectionSourceInfo : public ValueObject {
  public:
@@ -123,7 +123,7 @@ inline std::ostream& operator<<(std::ostream& os, const ReflectionSourceInfo& in
   return os;
 }
 
-class ReflectiveHandleScopeSourceInfo : public ReflectionSourceInfo {
+class EXPORT ReflectiveHandleScopeSourceInfo : public ReflectionSourceInfo {
  public:
   explicit ReflectiveHandleScopeSourceInfo(BaseReflectiveHandleScope* source)
       : ReflectionSourceInfo(kSourceThreadHandleScope), source_(source) {}

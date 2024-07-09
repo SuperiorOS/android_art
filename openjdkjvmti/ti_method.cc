@@ -63,7 +63,7 @@
 #include "mirror/object-inl.h"
 #include "mirror/object_array-inl.h"
 #include "nativehelper/scoped_local_ref.h"
-#include "oat_file.h"
+#include "oat/oat_file.h"
 #include "obj_ptr.h"
 #include "runtime.h"
 #include "runtime_callbacks.h"
@@ -249,6 +249,7 @@ jvmtiError MethodUtil::GetLocalVariableTable(jvmtiEnv* env,
     return OK;
   };
 
+  // To avoid defining visitor in the same line as the `if`. We define the lambda and use std::move.
   auto visitor = [&](const art::DexFile::LocalInfo& entry) {
     if (err != OK) {
       return;
@@ -275,9 +276,8 @@ jvmtiError MethodUtil::GetLocalVariableTable(jvmtiEnv* env,
     });
   };
 
-  if (!accessor.DecodeDebugLocalInfo(art_method->IsStatic(),
-                                     art_method->GetDexMethodIndex(),
-                                     visitor)) {
+  if (!accessor.DecodeDebugLocalInfo(
+          art_method->IsStatic(), art_method->GetDexMethodIndex(), std::move(visitor))) {
     // Something went wrong with decoding the debug information. It might as well not be there.
     return ERR(ABSENT_INFORMATION);
   }
@@ -754,6 +754,7 @@ jvmtiError CommonLocalVariableClosure::GetSlotType(art::ArtMethod* method,
   bool found = false;
   *type = art::Primitive::kPrimVoid;
   descriptor->clear();
+  // To avoid defining visitor in the same line as the `if`. We define the lambda and use std::move.
   auto visitor = [&](const art::DexFile::LocalInfo& entry) {
     if (!found && entry.start_address_ <= dex_pc && entry.end_address_ > dex_pc &&
         entry.reg_ == slot_) {
@@ -762,7 +763,8 @@ jvmtiError CommonLocalVariableClosure::GetSlotType(art::ArtMethod* method,
       *descriptor = entry.descriptor_;
     }
   };
-  if (!accessor.DecodeDebugLocalInfo(method->IsStatic(), method->GetDexMethodIndex(), visitor) ||
+  if (!accessor.DecodeDebugLocalInfo(
+          method->IsStatic(), method->GetDexMethodIndex(), std::move(visitor)) ||
       !found) {
     // Something went wrong with decoding the debug information. It might as well not be there.
     // Try to find the type with the verifier.

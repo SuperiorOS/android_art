@@ -53,13 +53,13 @@
 #include "base/utils.h"
 #include "class_linker.h"
 #include "entrypoints/runtime_asm_entrypoints.h"
-#include "oat_quick_method_header.h"
+#include "oat/oat_quick_method_header.h"
 #include "runtime.h"
 #include "thread-current-inl.h"
 
 #endif
 
-namespace art {
+namespace art HIDDEN {
 
 #if defined(__linux__)
 

@@ -28,6 +28,7 @@
 #include "arch/instruction_set.h"
 #include "base/common_art_test.h"
 #include "base/locks.h"
+#include "base/macros.h"
 #include "base/os.h"
 #include "base/unix_file/fd_file.h"
 #include "dex/art_dex_file_loader.h"
@@ -37,7 +38,7 @@
 #include "runtime_globals.h"
 #include "scoped_thread_state_change-inl.h"
 
-namespace art {
+namespace art HIDDEN {
 
 class MethodReference;
 class TypeReference;
@@ -280,6 +281,11 @@ class CheckJniAbortCatcher {
 #define TEST_DISABLED_FOR_ARM64()                       \
   if (kRuntimeISA == InstructionSet::kArm64) {          \
     GTEST_SKIP() << "WARNING: TEST DISABLED FOR ARM64"; \
+  }
+
+#define TEST_DISABLED_FOR_RISCV64()                       \
+  if (kRuntimeISA == InstructionSet::kRiscv64) {          \
+    GTEST_SKIP() << "WARNING: TEST DISABLED FOR RISCV64"; \
   }
 
 #define TEST_DISABLED_FOR_X86()                       \

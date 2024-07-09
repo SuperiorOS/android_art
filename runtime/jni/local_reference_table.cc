@@ -34,15 +34,10 @@
 
 #include <cstdlib>
 
-namespace art {
+namespace art HIDDEN {
 namespace jni {
 
 static constexpr bool kDumpStackOnNonLocalReference = false;
-static constexpr bool kDebugLRT = false;
-
-// Number of free lists in the allocator.
-ART_PAGE_SIZE_AGNOSTIC_DECLARE_AND_DEFINE(size_t, gNumLrtSlots,
-                                          WhichPowerOf2(gPageSize / kInitialLrtBytes));
 
 // Mmap an "indirect ref table region. Table_bytes is a multiple of a page size.
 static inline MemMap NewLRTMap(size_t table_bytes, std::string* error_msg) {
@@ -54,7 +49,7 @@ static inline MemMap NewLRTMap(size_t table_bytes, std::string* error_msg) {
 }
 
 SmallLrtAllocator::SmallLrtAllocator()
-    : free_lists_(gNumLrtSlots, nullptr),
+    : free_lists_(num_lrt_slots_, nullptr),
       shared_lrt_maps_(),
       lock_("Small LRT allocator lock", LockLevel::kGenericBottomLock) {
 }
@@ -64,7 +59,7 @@ inline size_t SmallLrtAllocator::GetIndex(size_t size) {
   DCHECK_LT(size, gPageSize / sizeof(LrtEntry));
   DCHECK(IsPowerOfTwo(size));
   size_t index = WhichPowerOf2(size / kSmallLrtEntries);
-  DCHECK_LT(index, gNumLrtSlots);
+  DCHECK_LT(index, num_lrt_slots_);
   return index;
 }
 
@@ -72,11 +67,11 @@ LrtEntry* SmallLrtAllocator::Allocate(size_t size, std::string* error_msg) {
   size_t index = GetIndex(size);
   MutexLock lock(Thread::Current(), lock_);
   size_t fill_from = index;
-  while (fill_from != gNumLrtSlots && free_lists_[fill_from] == nullptr) {
+  while (fill_from != num_lrt_slots_ && free_lists_[fill_from] == nullptr) {
     ++fill_from;
   }
   void* result = nullptr;
-  if (fill_from != gNumLrtSlots) {
+  if (fill_from != num_lrt_slots_) {
     // We found a slot with enough memory.
     result = free_lists_[fill_from];
     free_lists_[fill_from] = *reinterpret_cast<void**>(result);
@@ -105,13 +100,13 @@ LrtEntry* SmallLrtAllocator::Allocate(size_t size, std::string* error_msg) {
 void SmallLrtAllocator::Deallocate(LrtEntry* unneeded, size_t size) {
   size_t index = GetIndex(size);
   MutexLock lock(Thread::Current(), lock_);
-  while (index < gNumLrtSlots) {
+  while (index < num_lrt_slots_) {
     // Check if we can merge this free block with another block with the same size.
     void** other = reinterpret_cast<void**>(
         reinterpret_cast<uintptr_t>(unneeded) ^ (kInitialLrtBytes << index));
     void** before = &free_lists_[index];
-    if (index + 1u == gNumLrtSlots && *before == other && *other == nullptr) {
-      // Do not unmap the page if we do not have other free blocks with index `gNumLrtSlots - 1`.
+    if (index + 1u == num_lrt_slots_ && *before == other && *other == nullptr) {
+      // Do not unmap the page if we do not have other free blocks with index `num_lrt_slots_ - 1`.
       // (Keep at least one free block to avoid a situation where creating and destroying a single
       // thread with no local references would map and unmap a page in the `SmallLrtAllocator`.)
       break;
@@ -129,9 +124,9 @@ void SmallLrtAllocator::Deallocate(LrtEntry* unneeded, size_t size) {
     unneeded = reinterpret_cast<LrtEntry*>(
         reinterpret_cast<uintptr_t>(unneeded) & reinterpret_cast<uintptr_t>(other));
   }
-  if (index == gNumLrtSlots) {
+  if (index == num_lrt_slots_) {
     // Free the entire page.
-    DCHECK(free_lists_[gNumLrtSlots - 1u] != nullptr);
+    DCHECK(free_lists_[num_lrt_slots_ - 1u] != nullptr);
     auto match = [=](MemMap& map) { return unneeded == reinterpret_cast<LrtEntry*>(map.Begin()); };
     auto it = std::find_if(shared_lrt_maps_.begin(), shared_lrt_maps_.end(), match);
     DCHECK(it != shared_lrt_maps_.end());
@@ -144,7 +139,8 @@ void SmallLrtAllocator::Deallocate(LrtEntry* unneeded, size_t size) {
 }
 
 LocalReferenceTable::LocalReferenceTable(bool check_jni)
-    : segment_state_(kLRTFirstSegment),
+    : previous_state_(kLRTFirstSegment),
+      segment_state_(kLRTFirstSegment),
       max_entries_(0u),
       free_entries_list_(
           FirstFreeField::Update(kFreeListEnd, check_jni ? 1u << kFlagCheckJni : 0u)),
@@ -266,18 +262,16 @@ inline uint32_t LocalReferenceTable::IncrementSerialNumber(LrtEntry* serial_numb
   return new_serial_number;
 }
 
-IndirectRef LocalReferenceTable::Add(LRTSegmentState previous_state,
-                                     ObjPtr<mirror::Object> obj,
-                                     std::string* error_msg) {
+IndirectRef LocalReferenceTable::Add(ObjPtr<mirror::Object> obj, std::string* error_msg) {
   if (kDebugLRT) {
-    LOG(INFO) << "+++ Add: previous_state=" << previous_state.top_index
+    LOG(INFO) << "+++ Add: previous_state=" << previous_state_.top_index
               << " top_index=" << segment_state_.top_index;
   }
 
   DCHECK(obj != nullptr);
   VerifyObject(obj);
 
-  DCHECK_LE(previous_state.top_index, segment_state_.top_index);
+  DCHECK_LE(previous_state_.top_index, segment_state_.top_index);
   DCHECK(max_entries_ == kSmallLrtEntries ? small_table_ != nullptr : !tables_.empty());
 
   auto store_obj = [obj, this](LrtEntry* free_entry, const char* tag)
@@ -314,7 +308,7 @@ IndirectRef LocalReferenceTable::Add(LRTSegmentState previous_state,
         PrunePoppedFreeEntries(get_entry);
         first_free_index = GetFirstFreeIndex();
       }
-      if (first_free_index != kFreeListEnd && first_free_index >= previous_state.top_index) {
+      if (first_free_index != kFreeListEnd && first_free_index >= previous_state_.top_index) {
         DCHECK_LT(first_free_index, segment_state_.top_index);  // Popped entries pruned above.
         LrtEntry* free_entry = get_entry(first_free_index);
         // Use the `free_entry` only if it was created with CheckJNI disabled.
@@ -339,7 +333,7 @@ IndirectRef LocalReferenceTable::Add(LRTSegmentState previous_state,
     PrunePoppedFreeEntries([&](size_t index) { return GetEntry(index); });
     first_free_index = GetFirstFreeIndex();
   }
-  if (first_free_index != kFreeListEnd && first_free_index >= previous_state.top_index) {
+  if (first_free_index != kFreeListEnd && first_free_index >= previous_state_.top_index) {
     // Reuse the free entry if it was created with the same CheckJNI setting.
     DCHECK_LT(first_free_index, top_index);  // Popped entries have been pruned above.
     LrtEntry* free_entry = GetEntry(first_free_index);
@@ -397,7 +391,7 @@ IndirectRef LocalReferenceTable::Add(LRTSegmentState previous_state,
   // Use the next entry.
   if (UNLIKELY(IsCheckJniEnabled())) {
     DCHECK_ALIGNED(top_index, kCheckJniEntriesPerReference);
-    DCHECK_ALIGNED(previous_state.top_index, kCheckJniEntriesPerReference);
+    DCHECK_ALIGNED(previous_state_.top_index, kCheckJniEntriesPerReference);
     DCHECK_ALIGNED(max_entries_, kCheckJniEntriesPerReference);
     LrtEntry* serial_number_entry = GetEntry(top_index);
     uint32_t serial_number = IncrementSerialNumber(serial_number_entry);
@@ -421,9 +415,9 @@ IndirectRef LocalReferenceTable::Add(LRTSegmentState previous_state,
 // free entries under it to remove in order to reduce the size of the table.
 //
 // Returns "false" if nothing was removed.
-bool LocalReferenceTable::Remove(LRTSegmentState previous_state, IndirectRef iref) {
+bool LocalReferenceTable::Remove(IndirectRef iref) {
   if (kDebugLRT) {
-    LOG(INFO) << "+++ Remove: previous_state=" << previous_state.top_index
+    LOG(INFO) << "+++ Remove: previous_state=" << previous_state_.top_index
               << " top_index=" << segment_state_.top_index;
   }
 
@@ -460,14 +454,14 @@ bool LocalReferenceTable::Remove(LRTSegmentState previous_state, IndirectRef ire
     return false;
   }
 
-  DCHECK_LE(previous_state.top_index, segment_state_.top_index);
+  DCHECK_LE(previous_state_.top_index, segment_state_.top_index);
   DCHECK(max_entries_ == kSmallLrtEntries ? small_table_ != nullptr : !tables_.empty());
   DCheckValidReference(iref);
 
   LrtEntry* entry = ToLrtEntry(iref);
   uint32_t entry_index = GetReferenceEntryIndex(iref);
   uint32_t top_index = segment_state_.top_index;
-  const uint32_t bottom_index = previous_state.top_index;
+  const uint32_t bottom_index = previous_state_.top_index;
 
   if (entry_index < bottom_index) {
     // Wrong segment.
@@ -694,16 +688,6 @@ void LocalReferenceTable::Dump(std::ostream& os) const {
                        entries.push_back(*root);
                      });
   ReferenceTable::Dump(os, entries);
-}
-
-void LocalReferenceTable::SetSegmentState(LRTSegmentState new_state) {
-  if (kDebugLRT) {
-    LOG(INFO) << "Setting segment state: "
-              << segment_state_.top_index
-              << " -> "
-              << new_state.top_index;
-  }
-  segment_state_ = new_state;
 }
 
 bool LocalReferenceTable::EnsureFreeCapacity(size_t free_capacity, std::string* error_msg) {

@@ -85,8 +85,7 @@
 #include "odr_fs_utils.h"
 #include "odr_metrics.h"
 #include "odrefresh/odrefresh.h"
-#include "palette/palette.h"
-#include "palette/palette_types.h"
+#include "selinux/selinux.h"
 #include "tools/cmdline_builder.h"
 
 namespace art {
@@ -108,6 +107,7 @@ using ::android::base::StartsWith;
 using ::android::base::StringPrintf;
 using ::android::base::Timer;
 using ::android::modules::sdklevel::IsAtLeastU;
+using ::android::modules::sdklevel::IsAtLeastV;
 using ::art::tools::CmdlineBuilder;
 
 // Name of cache info file in the ART Apex artifact cache.
@@ -191,6 +191,28 @@ bool MoveOrEraseFiles(const std::vector<std::unique_ptr<File>>& files,
     }
   }
   return true;
+}
+
+Result<std::string> CreateStagingDirectory() {
+  std::string staging_dir = GetArtApexData() + "/staging";
+
+  std::error_code ec;
+  if (std::filesystem::exists(staging_dir, ec)) {
+    if (!std::filesystem::remove_all(staging_dir, ec)) {
+      return Errorf(
+          "Could not remove existing staging directory '{}': {}", staging_dir, ec.message());
+    }
+  }
+
+  if (mkdir(staging_dir.c_str(), S_IRWXU) != 0) {
+    return ErrnoErrorf("Could not create staging directory '{}'", staging_dir);
+  }
+
+  if (setfilecon(staging_dir.c_str(), "u:object_r:apex_art_staging_data_file:s0") != 0) {
+    return ErrnoErrorf("Could not set label on staging directory '{}'", staging_dir);
+  }
+
+  return staging_dir;
 }
 
 // Gets the `ApexInfo` associated with the currently active ART APEX.
@@ -488,7 +510,7 @@ Result<void> AddCacheInfoFd(/*inout*/ CmdlineBuilder& args,
                             const std::string& cache_info_filename) {
   std::unique_ptr<File> cache_info_file(OS::OpenFileForReading(cache_info_filename.c_str()));
   if (cache_info_file == nullptr) {
-    return ErrnoErrorf("Failed to open a cache info file '{}'", cache_info_file);
+    return ErrnoErrorf("Failed to open a cache info file '{}'", cache_info_filename);
   }
 
   args.Add("--cache-info-fd=%d", cache_info_file->Fd());
@@ -1099,15 +1121,17 @@ WARN_UNUSED bool OnDeviceRefresh::CheckSystemPropertiesHaveNotChanged(
 WARN_UNUSED bool OnDeviceRefresh::CheckBuildUserfaultFdGc() const {
   bool build_enable_uffd_gc =
       config_.GetSystemProperties().GetBool("ro.dalvik.vm.enable_uffd_gc", /*default_value=*/false);
+  bool is_at_most_u = !IsAtLeastV();
   bool kernel_supports_uffd = KernelSupportsUffd();
-  if (!art::odrefresh::CheckBuildUserfaultFdGc(build_enable_uffd_gc, kernel_supports_uffd)) {
-    // Assuming the system property reflects how the dexpreopted boot image was
-    // compiled, and it doesn't agree with runtime support, we need to recompile
-    // it. This happens if we're running on S, T or U, or if the system image
-    // was built with a wrong PRODUCT_ENABLE_UFFD_GC flag.
-    LOG(INFO) << ART_FORMAT(
-        "Userfaultfd GC check failed (build_enable_uffd_gc: {}, kernel_supports_uffd: {}).",
+  if (!art::odrefresh::CheckBuildUserfaultFdGc(
+          build_enable_uffd_gc, is_at_most_u, kernel_supports_uffd)) {
+    // Normally, this should not happen. If this happens, the system image was probably built with a
+    // wrong PRODUCT_ENABLE_UFFD_GC flag.
+    LOG(WARNING) << ART_FORMAT(
+        "Userfaultfd GC check failed (build_enable_uffd_gc: {}, is_at_most_u: {}, "
+        "kernel_supports_uffd: {}).",
         build_enable_uffd_gc,
+        is_at_most_u,
         kernel_supports_uffd);
     return false;
   }
@@ -2042,7 +2066,7 @@ OnDeviceRefresh::CompileSystemServer(const std::string& staging_dir,
 
 WARN_UNUSED ExitCode OnDeviceRefresh::Compile(OdrMetrics& metrics,
                                               CompilationOptions compilation_options) const {
-  const char* staging_dir = nullptr;
+  std::string staging_dir;
   metrics.SetStage(OdrMetrics::Stage::kPreparation);
 
   // If partial compilation is disabled, we should compile everything regardless of what's in
@@ -2080,13 +2104,16 @@ WARN_UNUSED ExitCode OnDeviceRefresh::Compile(OdrMetrics& metrics,
   }
 
   if (!config_.GetStagingDir().empty()) {
-    staging_dir = config_.GetStagingDir().c_str();
+    staging_dir = config_.GetStagingDir();
   } else {
     // Create staging area and assign label for generating compilation artifacts.
-    if (PaletteCreateOdrefreshStagingDirectory(&staging_dir) != PALETTE_STATUS_OK) {
+    Result<std::string> res = CreateStagingDirectory();
+    if (!res.ok()) {
+      LOG(ERROR) << res.error().message();
       metrics.SetStatus(OdrMetrics::Status::kStagingFailed);
       return ExitCode::kCleanupFailed;
     }
+    staging_dir = res.value();
   }
 
   std::string error_msg;

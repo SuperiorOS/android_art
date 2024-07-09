@@ -16,7 +16,10 @@
 
 #ifndef ART_RUNTIME_READ_BARRIER_OPTION_H_
 #define ART_RUNTIME_READ_BARRIER_OPTION_H_
-namespace art {
+
+#include "base/macros.h"
+
+namespace art HIDDEN {
 
 // Options for performing a read barrier or not.
 //
@@ -81,9 +84,9 @@ namespace art {
 //
 // The superclass becomes constant during the ClassStatus::kIdx stage, so it's safe to treat it
 // as constant when reading from locations that can reference only resolved classes.
-enum ReadBarrierOption {
-  kWithReadBarrier,     // Perform a read barrier.
-  kWithoutReadBarrier,  // Don't perform a read barrier.
+enum EXPORT ReadBarrierOption {
+  kWithReadBarrier,       // Perform a read barrier.
+  kWithoutReadBarrier,    // Don't perform a read barrier.
   kWithFromSpaceBarrier,  // Get the from-space address for the given to-space address. Used by CMC
 };
 

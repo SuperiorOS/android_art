@@ -24,10 +24,11 @@
 
 #include "base/allocator.h"
 #include "base/locks.h"
+#include "base/macros.h"
 #include "gc_root.h"
 #include "obj_ptr.h"
 
-namespace art {
+namespace art HIDDEN {
 namespace jni {
 class LocalReferenceTable;
 }  // namespace jni
@@ -54,7 +55,7 @@ class ReferenceTable {
       REQUIRES_SHARED(Locks::mutator_lock_)
       REQUIRES(!Locks::alloc_tracker_lock_);
 
-  void VisitRoots(RootVisitor* visitor, const RootInfo& root_info)
+  EXPORT void VisitRoots(RootVisitor* visitor, const RootInfo& root_info)
       REQUIRES_SHARED(Locks::mutator_lock_);
 
  private:

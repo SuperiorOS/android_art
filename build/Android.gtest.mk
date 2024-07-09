@@ -136,6 +136,7 @@ endif
 
 ART_TEST_MODULES_TARGET := $(ART_TEST_MODULES_COMMON) \
     art_artd_tests \
+    art_dexopt_chroot_setup_tests \
     art_odrefresh_tests \
 
 ART_TEST_MODULES_HOST := $(ART_TEST_MODULES_COMMON)
@@ -145,6 +146,7 @@ ifneq (,$(wildcard frameworks/native/libs/binder))
   # can build the libbinder_ndk dependency. It is not available as a prebuilt on
   # master-art.
   ART_TEST_MODULES_HOST += art_artd_tests
+  ART_TEST_MODULES_HOST += art_dexopt_chroot_setup_tests
 endif
 
 ART_TARGET_GTEST_NAMES := $(foreach tm,$(ART_TEST_MODULES_TARGET),\

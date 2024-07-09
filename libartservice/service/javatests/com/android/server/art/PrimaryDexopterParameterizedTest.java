@@ -168,6 +168,32 @@ public class PrimaryDexopterParameterizedTest extends PrimaryDexopterTestBase {
         params.mExpectedCompilerFilter = "speed";
         list.add(params);
 
+        // It respects the adjustment made by the callback.
+        params = new Params();
+        params.mRequestedCompilerFilter = "speed-profile";
+        params.mExpectedCallbackInputCompilerFilter = "speed-profile";
+        params.mCallbackReturnedCompilerFilter = "speed";
+        params.mExpectedCompilerFilter = "speed";
+        list.add(params);
+
+        // It upgrades the compiler filter before calling the callback.
+        params = new Params();
+        params.mRequestedCompilerFilter = "speed-profile";
+        params.mIsSystemUi = true;
+        params.mExpectedCallbackInputCompilerFilter = "speed";
+        params.mCallbackReturnedCompilerFilter = "speed";
+        params.mExpectedCompilerFilter = "speed";
+        list.add(params);
+
+        // It downgrades the compiler filter after calling the callback.
+        params = new Params();
+        params.mRequestedCompilerFilter = "speed-profile";
+        params.mExpectedCallbackInputCompilerFilter = "speed-profile";
+        params.mCallbackReturnedCompilerFilter = "speed-profile";
+        params.mIsUseEmbeddedDex = true;
+        params.mExpectedCompilerFilter = "verify";
+        list.add(params);
+
         return list;
     }
 
@@ -197,6 +223,17 @@ public class PrimaryDexopterParameterizedTest extends PrimaryDexopterTestBase {
         lenient().when(mArtd.mergeProfiles(any(), any(), any(), any(), any())).thenReturn(false);
 
         lenient().when(mArtd.isInDalvikCache(any())).thenReturn(mParams.mIsInDalvikCache);
+
+        if (mParams.mCallbackReturnedCompilerFilter != null) {
+            mConfig.setAdjustCompilerFilterCallback(
+                    Runnable::run, (packageName, originalCompilerFilter, reason) -> {
+                        assertThat(packageName).isEqualTo(PKG_NAME);
+                        assertThat(originalCompilerFilter)
+                                .isEqualTo(mParams.mExpectedCallbackInputCompilerFilter);
+                        assertThat(reason).isEqualTo("install");
+                        return mParams.mCallbackReturnedCompilerFilter;
+                    });
+        }
 
         mDexoptParams =
                 new DexoptParams.Builder("install")
@@ -239,14 +276,14 @@ public class PrimaryDexopterParameterizedTest extends PrimaryDexopterTestBase {
         // The first one is normal.
         doReturn(dexoptIsNeeded())
                 .when(mArtd)
-                .getDexoptNeeded("/data/app/foo/base.apk", "arm64", "PCL[]",
+                .getDexoptNeeded("/somewhere/app/foo/base.apk", "arm64", "PCL[]",
                         mParams.mExpectedCompilerFilter, mParams.mExpectedDexoptTrigger);
         doReturn(createArtdDexoptResult(false /* cancelled */, 100 /* wallTimeMs */,
                          400 /* cpuTimeMs */, 30000 /* sizeBytes */, 32000 /* sizeBeforeBytes */))
                 .when(mArtd)
-                .dexopt(deepEq(buildOutputArtifacts("/data/app/foo/base.apk", "arm64",
+                .dexopt(deepEq(buildOutputArtifacts("/somewhere/app/foo/base.apk", "arm64",
                                 mParams.mIsInDalvikCache, permissionSettings)),
-                        eq("/data/app/foo/base.apk"), eq("arm64"), eq("PCL[]"),
+                        eq("/somewhere/app/foo/base.apk"), eq("arm64"), eq("PCL[]"),
                         eq(mParams.mExpectedCompilerFilter), any() /* profile */,
                         isNull() /* inputVdex */, isNull() /* dmFile */,
                         eq(PriorityClass.INTERACTIVE), argThat(dexoptOptionsMatcher), any());
@@ -254,13 +291,13 @@ public class PrimaryDexopterParameterizedTest extends PrimaryDexopterTestBase {
         // The second one fails on `dexopt`.
         doReturn(dexoptIsNeeded())
                 .when(mArtd)
-                .getDexoptNeeded("/data/app/foo/base.apk", "arm", "PCL[]",
+                .getDexoptNeeded("/somewhere/app/foo/base.apk", "arm", "PCL[]",
                         mParams.mExpectedCompilerFilter, mParams.mExpectedDexoptTrigger);
         doThrow(ServiceSpecificException.class)
                 .when(mArtd)
-                .dexopt(deepEq(buildOutputArtifacts("/data/app/foo/base.apk", "arm",
+                .dexopt(deepEq(buildOutputArtifacts("/somewhere/app/foo/base.apk", "arm",
                                 mParams.mIsInDalvikCache, permissionSettings)),
-                        eq("/data/app/foo/base.apk"), eq("arm"), eq("PCL[]"),
+                        eq("/somewhere/app/foo/base.apk"), eq("arm"), eq("PCL[]"),
                         eq(mParams.mExpectedCompilerFilter), any() /* profile */,
                         isNull() /* inputVdex */, isNull() /* dmFile */,
                         eq(PriorityClass.INTERACTIVE), argThat(dexoptOptionsMatcher), any());
@@ -268,47 +305,47 @@ public class PrimaryDexopterParameterizedTest extends PrimaryDexopterTestBase {
         // The third one doesn't need dexopt.
         doReturn(dexoptIsNotNeeded())
                 .when(mArtd)
-                .getDexoptNeeded("/data/app/foo/split_0.apk", "arm64", "PCL[base.apk]",
+                .getDexoptNeeded("/somewhere/app/foo/split_0.apk", "arm64", "PCL[base.apk]",
                         mParams.mExpectedCompilerFilter, mParams.mExpectedDexoptTrigger);
 
         // The fourth one is normal.
         doReturn(dexoptIsNeeded())
                 .when(mArtd)
-                .getDexoptNeeded("/data/app/foo/split_0.apk", "arm", "PCL[base.apk]",
+                .getDexoptNeeded("/somewhere/app/foo/split_0.apk", "arm", "PCL[base.apk]",
                         mParams.mExpectedCompilerFilter, mParams.mExpectedDexoptTrigger);
         doReturn(createArtdDexoptResult(false /* cancelled */, 200 /* wallTimeMs */,
                          200 /* cpuTimeMs */, 10000 /* sizeBytes */, 0 /* sizeBeforeBytes */))
                 .when(mArtd)
-                .dexopt(deepEq(buildOutputArtifacts("/data/app/foo/split_0.apk", "arm",
+                .dexopt(deepEq(buildOutputArtifacts("/somewhere/app/foo/split_0.apk", "arm",
                                 mParams.mIsInDalvikCache, permissionSettings)),
-                        eq("/data/app/foo/split_0.apk"), eq("arm"), eq("PCL[base.apk]"),
+                        eq("/somewhere/app/foo/split_0.apk"), eq("arm"), eq("PCL[base.apk]"),
                         eq(mParams.mExpectedCompilerFilter), any() /* profile */,
                         isNull() /* inputVdex */, isNull() /* dmFile */,
                         eq(PriorityClass.INTERACTIVE), argThat(dexoptOptionsMatcher), any());
 
         // Only delete runtime artifacts for successful dexopt operations, namely the first one and
         // the fourth one.
-        doReturn(1l).when(mArtd).deleteRuntimeArtifacts(deepEq(
-                AidlUtils.buildRuntimeArtifactsPath(PKG_NAME, "/data/app/foo/base.apk", "arm64")));
-        doReturn(1l).when(mArtd).deleteRuntimeArtifacts(deepEq(
-                AidlUtils.buildRuntimeArtifactsPath(PKG_NAME, "/data/app/foo/split_0.apk", "arm")));
+        doReturn(1l).when(mArtd).deleteRuntimeArtifacts(deepEq(AidlUtils.buildRuntimeArtifactsPath(
+                PKG_NAME, "/somewhere/app/foo/base.apk", "arm64")));
+        doReturn(1l).when(mArtd).deleteRuntimeArtifacts(deepEq(AidlUtils.buildRuntimeArtifactsPath(
+                PKG_NAME, "/somewhere/app/foo/split_0.apk", "arm")));
 
         assertThat(mPrimaryDexopter.dexopt())
                 .comparingElementsUsing(TestingUtils.<DexContainerFileDexoptResult>deepEquality())
                 .containsExactly(
-                        DexContainerFileDexoptResult.create("/data/app/foo/base.apk",
+                        DexContainerFileDexoptResult.create("/somewhere/app/foo/base.apk",
                                 true /* isPrimaryAbi */, "arm64-v8a",
                                 mParams.mExpectedCompilerFilter, DexoptResult.DEXOPT_PERFORMED,
                                 100 /* dex2oatWallTimeMillis */, 400 /* dex2oatCpuTimeMillis */,
                                 30000 /* sizeBytes */, 32000 /* sizeBeforeBytes */,
                                 0 /* extendedStatusFlags */, List.of() /* externalProfileErrors */),
-                        DexContainerFileDexoptResult.create("/data/app/foo/base.apk",
+                        DexContainerFileDexoptResult.create("/somewhere/app/foo/base.apk",
                                 false /* isPrimaryAbi */, "armeabi-v7a",
                                 mParams.mExpectedCompilerFilter, DexoptResult.DEXOPT_FAILED),
-                        DexContainerFileDexoptResult.create("/data/app/foo/split_0.apk",
+                        DexContainerFileDexoptResult.create("/somewhere/app/foo/split_0.apk",
                                 true /* isPrimaryAbi */, "arm64-v8a",
                                 mParams.mExpectedCompilerFilter, DexoptResult.DEXOPT_SKIPPED),
-                        DexContainerFileDexoptResult.create("/data/app/foo/split_0.apk",
+                        DexContainerFileDexoptResult.create("/somewhere/app/foo/split_0.apk",
                                 false /* isPrimaryAbi */, "armeabi-v7a",
                                 mParams.mExpectedCompilerFilter, DexoptResult.DEXOPT_PERFORMED,
                                 200 /* dex2oatWallTimeMillis */, 200 /* dex2oatCpuTimeMillis */,
@@ -334,6 +371,7 @@ public class PrimaryDexopterParameterizedTest extends PrimaryDexopterTestBase {
 
         // Options.
         public String mRequestedCompilerFilter = "verify";
+        public String mCallbackReturnedCompilerFilter = null;
         public boolean mForce = false;
         public boolean mShouldDowngrade = false;
         public boolean mSkipIfStorageLow = false;
@@ -343,6 +381,7 @@ public class PrimaryDexopterParameterizedTest extends PrimaryDexopterTestBase {
         public boolean mAlwaysDebuggable = false;
 
         // Expectations.
+        public String mExpectedCallbackInputCompilerFilter = "verify";
         public String mExpectedCompilerFilter = "verify";
         public int mExpectedDexoptTrigger = DexoptTrigger.COMPILER_FILTER_IS_BETTER
                 | DexoptTrigger.PRIMARY_BOOT_IMAGE_BECOMES_USABLE | DexoptTrigger.NEED_EXTRACTION;
@@ -358,19 +397,22 @@ public class PrimaryDexopterParameterizedTest extends PrimaryDexopterTestBase {
                             + "isLauncher=%b,"
                             + "isUseEmbeddedDex=%b,"
                             + "requestedCompilerFilter=%s,"
+                            + "callbackReturnedCompilerFilter=%s,"
                             + "force=%b,"
                             + "shouldDowngrade=%b,"
                             + "skipIfStorageLow=%b,"
                             + "ignoreProfile=%b,"
                             + "alwaysDebuggable=%b"
                             + " => "
-                            + "targetCompilerFilter=%s,"
+                            + "expectedCallbackInputCompilerFilter=%s,"
+                            + "expectedCompilerFilter=%s,"
                             + "expectedDexoptTrigger=%d,"
                             + "expectedIsDebuggable=%b,"
                             + "expectedIsHiddenApiPolicyEnabled=%b",
                     mIsInDalvikCache, mHiddenApiEnforcementPolicy, mIsVmSafeMode, mIsDebuggable,
-                    mIsSystemUi, mIsLauncher, mIsUseEmbeddedDex, mRequestedCompilerFilter, mForce,
-                    mShouldDowngrade, mSkipIfStorageLow, mIgnoreProfile, mAlwaysDebuggable,
+                    mIsSystemUi, mIsLauncher, mIsUseEmbeddedDex, mRequestedCompilerFilter,
+                    mCallbackReturnedCompilerFilter, mForce, mShouldDowngrade, mSkipIfStorageLow,
+                    mIgnoreProfile, mAlwaysDebuggable, mExpectedCallbackInputCompilerFilter,
                     mExpectedCompilerFilter, mExpectedDexoptTrigger, mExpectedIsDebuggable,
                     mExpectedIsHiddenApiPolicyEnabled);
         }

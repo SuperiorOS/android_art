@@ -164,15 +164,15 @@ class CodeItemDebugInfoAccessor : public CodeItemDataAccessor {
   template<typename NewLocalVisitor>
   bool DecodeDebugLocalInfo(bool is_static,
                             uint32_t method_idx,
-                            const NewLocalVisitor& new_local) const;
+                            NewLocalVisitor&& new_local) const;
 
   // Visit each parameter in the debug information. Returns the line number.
   // The argument of the Visitor is dex::StringIndex.
   template <typename Visitor>
-  uint32_t VisitParameterNames(const Visitor& visitor) const;
+  uint32_t VisitParameterNames(Visitor&& visitor) const;
 
   template <typename Visitor>
-  bool DecodeDebugPositionInfo(const Visitor& visitor) const;
+  bool DecodeDebugPositionInfo(Visitor&& visitor) const;
 
   bool GetLineNumForPc(const uint32_t pc, uint32_t* line_num) const;
 

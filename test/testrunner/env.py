@@ -148,4 +148,16 @@ SOONG_OUT_DIR = _get_build_var('SOONG_OUT_DIR')
 ART_TEST_RUN_ON_ARM_FVP = _getEnvBoolean('ART_TEST_RUN_ON_ARM_FVP', False)
 
 ART_TEST_ON_VM = _env.get('ART_TEST_ON_VM')
-ART_SSH_CMD = _env.get('ART_SSH_CMD')
+
+ART_TEST_SSH_PORT = _env.get('ART_TEST_SSH_PORT', 10001)
+ART_TEST_SSH_USER = _env.get('ART_TEST_SSH_USER', 'ubuntu')
+ART_TEST_SSH_HOST = _env.get('ART_TEST_SSH_HOST', 'localhost')
+ART_SSH_CONFIG = os.path.join(os.path.dirname(__file__), 'ssh_config')
+ART_SSH_CMD = _env.get('ART_SSH_CMD', f"ssh -q -F {ART_SSH_CONFIG} -p {ART_TEST_SSH_PORT} "
+                                      f"{ART_TEST_SSH_USER}@{ART_TEST_SSH_HOST}")
+ART_SCP_CMD = _env.get('ART_SCP_CMD', f"scp -q -F {ART_SSH_CONFIG} -P {ART_TEST_SSH_PORT} -p -r")
+ART_CHROOT_CMD = _env.get('ART_CHROOT_CMD', "unshare --user --map-root-user chroot art-test-chroot")
+if ART_TEST_ON_VM:
+  ART_TEST_CHROOT = _env.get('ART_TEST_CHROOT', f"/home/{ART_TEST_SSH_USER}/art-test-chroot")
+else:
+  ART_TEST_CHROOT = _env.get('ART_TEST_CHROOT', "/data/local/art-test-chroot")

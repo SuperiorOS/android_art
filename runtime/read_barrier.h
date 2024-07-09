@@ -28,7 +28,7 @@
 #include "offsets.h"
 #include "read_barrier_config.h"
 
-namespace art {
+namespace art HIDDEN {
 namespace mirror {
 class Object;
 template<typename MirrorType> class HeapReference;

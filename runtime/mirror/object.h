@@ -20,6 +20,7 @@
 #include "base/atomic.h"
 #include "base/casts.h"
 #include "base/enums.h"
+#include "base/macros.h"
 #include "dex/primitive.h"
 #include "obj_ptr.h"
 #include "object_reference.h"
@@ -29,7 +30,7 @@
 #include "runtime_globals.h"
 #include "verify_object.h"
 
-namespace art {
+namespace art HIDDEN {
 
 class ArtField;
 class ArtMethod;
@@ -74,7 +75,7 @@ static constexpr bool kCheckFieldAssignments = false;
 static constexpr uint32_t kObjectHeaderSize = 8;
 
 // C++ mirror of java.lang.Object
-class MANAGED LOCKABLE Object {
+class EXPORT MANAGED LOCKABLE Object {
  public:
   MIRROR_CLASS("Ljava/lang/Object;");
 
@@ -138,10 +139,15 @@ class MANAGED LOCKABLE Object {
       REQUIRES_SHARED(Locks::mutator_lock_)
       REQUIRES(!Roles::uninterruptible_);
 
+  // Returns a nonzero value that fits into lockword slot.
   int32_t IdentityHashCode()
       REQUIRES_SHARED(Locks::mutator_lock_)
       REQUIRES(!Locks::thread_list_lock_,
                !Locks::thread_suspend_count_lock_);
+
+  // Identical to the above, but returns 0 if monitor inflation would otherwise be needed.
+  int32_t IdentityHashCodeNoInflation() REQUIRES_SHARED(Locks::mutator_lock_)
+      REQUIRES(!Locks::thread_list_lock_, !Locks::thread_suspend_count_lock_);
 
   static constexpr MemberOffset MonitorOffset() {
     return OFFSET_OF_OBJECT_MEMBER(Object, monitor_);
@@ -727,6 +733,10 @@ class MANAGED LOCKABLE Object {
       REQUIRES_SHARED(Locks::mutator_lock_);
 
  private:
+  template <bool kAllowInflation>
+  int32_t IdentityHashCodeHelper() REQUIRES_SHARED(Locks::mutator_lock_)
+      REQUIRES(!Locks::thread_list_lock_, !Locks::thread_suspend_count_lock_);
+
   // Get a field with acquire semantics.
   template<typename kSize>
   ALWAYS_INLINE kSize GetFieldAcquire(MemberOffset field_offset)

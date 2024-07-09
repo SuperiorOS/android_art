@@ -25,7 +25,7 @@
 #include "monitor.h"
 #include "thread-current-inl.h"
 
-namespace art {
+namespace art HIDDEN {
 
 RuntimeCallbacks::RuntimeCallbacks()
     : callback_lock_(new ReaderWriterMutex("Runtime callbacks lock",

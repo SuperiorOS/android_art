@@ -32,21 +32,25 @@
 #include "jit/jit_code_cache.h"
 #include "mirror/class.h"
 #include "mirror/object_reference.h"
-#include "oat_file.h"
-#include "oat_quick_method_header.h"
+#include "oat/oat_file.h"
+#include "oat/oat_quick_method_header.h"
 #include "sigchain.h"
 #include "thread-current-inl.h"
 #include "verify_object-inl.h"
 
-namespace art {
+namespace art HIDDEN {
 // Static fault manger object accessed by signal handler.
 FaultManager fault_manager;
 
-// This needs to be NO_INLINE since some debuggers do not read the inline-info to set a breakpoint
-// if it isn't.
+// These need to be NO_INLINE since some debuggers do not read the inline-info to set a breakpoint
+// if they aren't.
 extern "C" NO_INLINE __attribute__((visibility("default"))) void art_sigsegv_fault() {
   // Set a breakpoint here to be informed when a SIGSEGV is unhandled by ART.
   VLOG(signals)<< "Caught unknown SIGSEGV in ART fault handler - chaining to next handler.";
+}
+extern "C" NO_INLINE __attribute__((visibility("default"))) void art_sigbus_fault() {
+  // Set a breakpoint here to be informed when a SIGBUS is unhandled by ART.
+  VLOG(signals) << "Caught unknown SIGBUS in ART fault handler - chaining to next handler.";
 }
 
 // Signal handler called on SIGSEGV.
@@ -232,7 +236,13 @@ bool FaultManager::HandleSigbusFault(int sig, siginfo_t* info, [[maybe_unused]] 
   // Simulate a crash in a handler.
   raise(SIGBUS);
 #endif
-  return Runtime::Current()->GetHeap()->MarkCompactCollector()->SigbusHandler(info);
+  if (Runtime::Current()->GetHeap()->MarkCompactCollector()->SigbusHandler(info)) {
+    return true;
+  }
+
+  // Set a breakpoint in this function to catch unhandled signals.
+  art_sigbus_fault();
+  return false;
 }
 
 inline void FaultManager::CheckForUnrecognizedImplicitSuspendCheckInBootImage(

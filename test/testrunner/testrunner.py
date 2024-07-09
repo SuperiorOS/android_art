@@ -81,6 +81,7 @@ import env
 from target_config import target_config
 from device_config import device_config
 from typing import Dict, Set, List
+from functools import lru_cache
 
 # TODO: make it adjustable per tests and for buildbots
 #
@@ -315,7 +316,8 @@ def setup_test_env():
     device_name = get_device_name()
     if n_thread == 0:
       # Use only part of the cores since fully loading the device tends to lead to timeouts.
-      n_thread = max(1, int(get_target_cpu_count() * 0.75))
+      fraction = 1.0 if env.ART_TEST_ON_VM else 0.75
+      n_thread = max(1, int(get_target_cpu_count() * fraction))
       if device_name == 'fugu':
         n_thread = 1
   else:
@@ -717,6 +719,12 @@ def run_test(args, test, test_variant, test_name):
     failed_tests.append((test_name, str(e)))
     return (test_name, 'FAIL', ('%s\n%s\n\n') % (command, str(e)), datetime.timedelta())
 
+@lru_cache
+def get_console_width(default=100):
+  # NB: The command may fail if we are running under 'nohup'.
+  proc = subprocess.run(['stty', 'size'], capture_output=True)
+  return int(proc.stdout.decode("utf8").split()[1]) if proc.returncode == 0 else default
+
 def print_test_info(test_count, test_name, result, failed_test_info="",
                     test_time=datetime.timedelta()):
   """Print the continous test information
@@ -738,8 +746,7 @@ def print_test_info(test_count, test_name, result, failed_test_info="",
     # Without --verbose, the testrunner erases passing test info. It
     # does that by overriding the printed text with white spaces all across
     # the console width.
-    console_width = int(os.popen('stty size', 'r').read().split()[1])
-    info = '\r' + ' ' * console_width + '\r'
+    info = '\r' + ' ' * get_console_width() + '\r'
   try:
     percent = (test_count * 100) / total_test_count
     progress_info = ('[ %d%% %d/%d ]') % (
@@ -778,7 +785,7 @@ def print_test_info(test_count, test_name, result, failed_test_info="",
         total_output_length = 2 # Two spaces
         total_output_length += len(progress_info)
         total_output_length += len(result)
-        allowed_test_length = console_width - total_output_length
+        allowed_test_length = get_console_width() - total_output_length
         test_name_len = len(test_name)
         if allowed_test_length < test_name_len:
           test_name = ('...%s') % (
@@ -946,8 +953,7 @@ def print_analysis():
     # Without --verbose, the testrunner erases passing test info. It
     # does that by overriding the printed text with white spaces all across
     # the console width.
-    console_width = int(os.popen('stty size', 'r').read().split()[1])
-    eraser_text = '\r' + ' ' * console_width + '\r'
+    eraser_text = '\r' + ' ' * get_console_width() + '\r'
     print_text(eraser_text)
 
   # Prints information about the total tests run.

@@ -22,7 +22,7 @@
 
 #include "runtime_common.h"
 
-namespace art {
+namespace art HIDDEN {
 
 struct sigaction old_action;
 

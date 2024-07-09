@@ -46,6 +46,18 @@ class JniMacroAssemblerRiscv64Test : public AssemblerTestBase {
  protected:
   InstructionSet GetIsa() override { return InstructionSet::kRiscv64; }
 
+  std::vector<std::string> GetAssemblerCommand() override {
+    std::vector<std::string> result = AssemblerTestBase::GetAssemblerCommand();
+    if (march_override_.has_value()) {
+      auto it = std::find_if(result.begin(),
+                             result.end(),
+                             [](const std::string& s) { return StartsWith(s, "-march="); });
+      CHECK(it != result.end());
+      *it = march_override_.value();
+    }
+    return result;
+  }
+
   void DriverStr(const std::string& assembly_text, const std::string& test_name) {
     assembler_.FinalizeCode();
     size_t cs = assembler_.CodeSize();
@@ -76,6 +88,9 @@ class JniMacroAssemblerRiscv64Test : public AssemblerTestBase {
   MallocArenaPool pool_;
   ArenaAllocator allocator_;
   Riscv64JNIMacroAssembler assembler_;
+
+  // TODO: Implement auto-compression and remove this override.
+  std::optional<std::string> march_override_ = "-march=rv64imafdv_zba_zbb";
 };
 
 TEST_F(JniMacroAssemblerRiscv64Test, StackFrame) {
@@ -270,6 +285,12 @@ TEST_F(JniMacroAssemblerRiscv64Test, Load) {
   expected += "lwu t0, 0(a0)\n";
   __ LoadGcRootWithoutReadBarrier(AsManaged(T1), AsManaged(S2), MemberOffset(0x800));
   expected += "addi t6, s2, 0x7f8\n"
+              "lwu t1, 8(t6)\n";
+
+  __ LoadStackReference(AsManaged(T0), FrameOffset(0));
+  expected += "lwu t0, 0(sp)\n";
+  __ LoadStackReference(AsManaged(T1), FrameOffset(0x800));
+  expected += "addi t6, sp, 0x7f8\n"
               "lwu t1, 8(t6)\n";
 
   DriverStr(expected, "Load");
@@ -693,7 +714,7 @@ TEST_F(JniMacroAssemblerRiscv64Test, DecodeJNITransitionOrLocalJObject) {
               "andi t6, a0, " + std::to_string(kGlobalOrWeakGlobalMask) + "\n"
               "bnez t6, 2f\n"
               "andi a0, a0, ~" + std::to_string(kIndirectRefKindMask) + "\n"
-              "lw a0, (a0)\n";
+              "lwu a0, (a0)\n";
 
   __ Bind(resume.get());
   expected += "1:\n";

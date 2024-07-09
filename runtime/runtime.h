@@ -54,7 +54,7 @@
 #include "reflective_value_visitor.h"
 #include "runtime_stats.h"
 
-namespace art {
+namespace art HIDDEN {
 
 namespace gc {
 class AbstractSystemWeakHolder;
@@ -127,16 +127,16 @@ using RuntimeOptions = std::vector<std::pair<std::string, const void*>>;
 class Runtime {
  public:
   // Parse raw runtime options.
-  static bool ParseOptions(const RuntimeOptions& raw_options,
-                           bool ignore_unrecognized,
-                           RuntimeArgumentMap* runtime_options);
+  EXPORT static bool ParseOptions(const RuntimeOptions& raw_options,
+                                  bool ignore_unrecognized,
+                                  RuntimeArgumentMap* runtime_options);
 
   // Creates and initializes a new runtime.
-  static bool Create(RuntimeArgumentMap&& runtime_options)
+  EXPORT static bool Create(RuntimeArgumentMap&& runtime_options)
       SHARED_TRYLOCK_FUNCTION(true, Locks::mutator_lock_);
 
   // Creates and initializes a new runtime.
-  static bool Create(const RuntimeOptions& raw_options, bool ignore_unrecognized)
+  EXPORT static bool Create(const RuntimeOptions& raw_options, bool ignore_unrecognized)
       SHARED_TRYLOCK_FUNCTION(true, Locks::mutator_lock_);
 
   enum class RuntimeDebugState {
@@ -245,7 +245,7 @@ class Runtime {
   // Starts a runtime, which may cause threads to be started and code to run.
   bool Start() UNLOCK_FUNCTION(Locks::mutator_lock_);
 
-  bool IsShuttingDown(Thread* self);
+  EXPORT bool IsShuttingDown(Thread* self);
   bool IsShuttingDownLocked() const REQUIRES(Locks::runtime_shutdown_lock_) {
     return shutting_down_.load(std::memory_order_relaxed);
   }
@@ -264,7 +264,7 @@ class Runtime {
     threads_being_born_++;
   }
 
-  void EndThreadBirth() REQUIRES(Locks::runtime_shutdown_lock_);
+  EXPORT void EndThreadBirth() REQUIRES(Locks::runtime_shutdown_lock_);
 
   bool IsStarted() const {
     return started_;
@@ -274,7 +274,7 @@ class Runtime {
     return finished_starting_;
   }
 
-  void RunRootClinits(Thread* self) REQUIRES_SHARED(Locks::mutator_lock_);
+  EXPORT void RunRootClinits(Thread* self) REQUIRES_SHARED(Locks::mutator_lock_);
 
   static Runtime* Current() {
     return instance_;
@@ -287,27 +287,31 @@ class Runtime {
   // For test use only.
   static void TestOnlySetCurrent(Runtime* instance) { instance_ = instance; }
 
+  // Set whichever abort message locations are appropriate to copies of the argument. Used by
+  // Abort() and Thread::AbortInThis().
+  static void SetAbortMessage(const char* msg) REQUIRES(!Locks::abort_lock_);
+
   // Aborts semi-cleanly. Used in the implementation of LOG(FATAL), which most
   // callers should prefer.
-  NO_RETURN static void Abort(const char* msg) REQUIRES(!Locks::abort_lock_);
+  NO_RETURN EXPORT static void Abort(const char* msg) REQUIRES(!Locks::abort_lock_);
 
   // Returns the "main" ThreadGroup, used when attaching user threads.
   jobject GetMainThreadGroup() const;
 
   // Returns the "system" ThreadGroup, used when attaching our internal threads.
-  jobject GetSystemThreadGroup() const;
+  EXPORT jobject GetSystemThreadGroup() const;
 
   // Returns the system ClassLoader which represents the CLASSPATH.
-  jobject GetSystemClassLoader() const;
+  EXPORT jobject GetSystemClassLoader() const;
 
   // Attaches the calling native thread to the runtime.
-  bool AttachCurrentThread(const char* thread_name,
-                           bool as_daemon,
-                           jobject thread_group,
-                           bool create_peer,
-                           bool should_run_callbacks = true);
+  EXPORT bool AttachCurrentThread(const char* thread_name,
+                                  bool as_daemon,
+                                  jobject thread_group,
+                                  bool create_peer,
+                                  bool should_run_callbacks = true);
 
-  void CallExitHook(jint status);
+  EXPORT void CallExitHook(jint status);
 
   // Detaches the current native thread from the runtime.
   void DetachCurrentThread(bool should_run_callbacks = true) REQUIRES(!Locks::mutator_lock_);
@@ -319,7 +323,7 @@ class Runtime {
   void DumpForSigQuit(std::ostream& os);
   void DumpLockHolders(std::ostream& os);
 
-  ~Runtime();
+  EXPORT ~Runtime();
 
   const std::vector<std::string>& GetBootClassPath() const {
     return boot_class_path_;
@@ -332,26 +336,27 @@ class Runtime {
   }
 
   // Dynamically adds an element to boot class path.
-  void AppendToBootClassPath(const std::string& filename,
-                             const std::string& location,
-                             const std::vector<std::unique_ptr<const art::DexFile>>& dex_files);
+  EXPORT void AppendToBootClassPath(
+      const std::string& filename,
+      const std::string& location,
+      const std::vector<std::unique_ptr<const art::DexFile>>& dex_files);
 
   // Same as above, but takes raw pointers.
-  void AppendToBootClassPath(const std::string& filename,
-                             const std::string& location,
-                             const std::vector<const art::DexFile*>& dex_files);
+  EXPORT void AppendToBootClassPath(const std::string& filename,
+                                    const std::string& location,
+                                    const std::vector<const art::DexFile*>& dex_files);
 
   // Same as above, but also takes a dex cache for each dex file.
-  void AppendToBootClassPath(
+  EXPORT void AppendToBootClassPath(
       const std::string& filename,
       const std::string& location,
       const std::vector<std::pair<const art::DexFile*, ObjPtr<mirror::DexCache>>>&
           dex_files_and_cache);
 
   // Dynamically adds an element to boot class path and takes ownership of the dex files.
-  void AddExtraBootDexFiles(const std::string& filename,
-                            const std::string& location,
-                            std::vector<std::unique_ptr<const art::DexFile>>&& dex_files);
+  EXPORT void AddExtraBootDexFiles(const std::string& filename,
+                                   const std::string& location,
+                                   std::vector<std::unique_ptr<const art::DexFile>>&& dex_files);
 
   ArrayRef<File> GetBootClassPathFiles() { return ArrayRef<File>(boot_class_path_files_); }
 
@@ -424,14 +429,14 @@ class Runtime {
   // Get the special object used to mark a cleared JNI weak global.
   mirror::Object* GetClearedJniWeakGlobal() REQUIRES_SHARED(Locks::mutator_lock_);
 
-  mirror::Throwable* GetPreAllocatedOutOfMemoryErrorWhenThrowingException()
+  EXPORT mirror::Throwable* GetPreAllocatedOutOfMemoryErrorWhenThrowingException()
       REQUIRES_SHARED(Locks::mutator_lock_);
-  mirror::Throwable* GetPreAllocatedOutOfMemoryErrorWhenThrowingOOME()
+  EXPORT mirror::Throwable* GetPreAllocatedOutOfMemoryErrorWhenThrowingOOME()
       REQUIRES_SHARED(Locks::mutator_lock_);
-  mirror::Throwable* GetPreAllocatedOutOfMemoryErrorWhenHandlingStackOverflow()
+  EXPORT mirror::Throwable* GetPreAllocatedOutOfMemoryErrorWhenHandlingStackOverflow()
       REQUIRES_SHARED(Locks::mutator_lock_);
 
-  mirror::Throwable* GetPreAllocatedNoClassDefFoundError()
+  EXPORT mirror::Throwable* GetPreAllocatedNoClassDefFoundError()
       REQUIRES_SHARED(Locks::mutator_lock_);
 
   const std::vector<std::string>& GetProperties() const {
@@ -459,13 +464,13 @@ class Runtime {
 
   // Visit all the roots. If only_dirty is true then non-dirty roots won't be visited. If
   // clean_dirty is true then dirty roots will be marked as non-dirty after visiting.
-  void VisitRoots(RootVisitor* visitor, VisitRootFlags flags = kVisitRootFlagAllRoots)
+  EXPORT void VisitRoots(RootVisitor* visitor, VisitRootFlags flags = kVisitRootFlagAllRoots)
       REQUIRES(!Locks::classlinker_classes_lock_, !Locks::trace_lock_)
       REQUIRES_SHARED(Locks::mutator_lock_);
 
   // Visit image roots, only used for hprof since the GC uses the image space mod union table
   // instead.
-  void VisitImageRoots(RootVisitor* visitor) REQUIRES_SHARED(Locks::mutator_lock_);
+  EXPORT void VisitImageRoots(RootVisitor* visitor) REQUIRES_SHARED(Locks::mutator_lock_);
 
   // Visit all of the roots we can safely visit concurrently.
   void VisitConcurrentRoots(RootVisitor* visitor,
@@ -482,11 +487,12 @@ class Runtime {
 
   // Sweep system weaks, the system weak is deleted if the visitor return null. Otherwise, the
   // system weak is updated to be the visitor's returned value.
-  void SweepSystemWeaks(IsMarkedVisitor* visitor) REQUIRES_SHARED(Locks::mutator_lock_);
+  EXPORT void SweepSystemWeaks(IsMarkedVisitor* visitor) REQUIRES_SHARED(Locks::mutator_lock_);
 
   // Walk all reflective objects and visit their targets as well as any method/fields held by the
   // runtime threads that are marked as being reflective.
-  void VisitReflectiveTargets(ReflectiveValueVisitor* visitor) REQUIRES(Locks::mutator_lock_);
+  EXPORT void VisitReflectiveTargets(ReflectiveValueVisitor* visitor)
+      REQUIRES(Locks::mutator_lock_);
   // Helper for visiting reflective targets with lambdas for both field and method reflective
   // targets.
   template <typename FieldVis, typename MethodVis>
@@ -557,13 +563,13 @@ class Runtime {
     return instruction_set_;
   }
 
-  void SetInstructionSet(InstructionSet instruction_set);
+  EXPORT void SetInstructionSet(InstructionSet instruction_set);
   void ClearInstructionSet();
 
-  void SetCalleeSaveMethod(ArtMethod* method, CalleeSaveType type);
+  EXPORT void SetCalleeSaveMethod(ArtMethod* method, CalleeSaveType type);
   void ClearCalleeSaveMethods();
 
-  ArtMethod* CreateCalleeSaveMethod() REQUIRES_SHARED(Locks::mutator_lock_);
+  EXPORT ArtMethod* CreateCalleeSaveMethod() REQUIRES_SHARED(Locks::mutator_lock_);
 
   uint64_t GetStat(int kind);
 
@@ -594,7 +600,7 @@ class Runtime {
   }
 
   // Returns true if JIT compilations are enabled. GetJit() will be not null in this case.
-  bool UseJitCompilation() const;
+  EXPORT bool UseJitCompilation() const;
 
   void PreZygoteFork();
   void PostZygoteFork();
@@ -621,11 +627,12 @@ class Runtime {
                        int32_t code_type);
 
   // Transaction support.
-  bool IsActiveTransaction() const;
+  EXPORT bool IsActiveTransaction() const;
   // EnterTransactionMode may suspend.
-  void EnterTransactionMode(bool strict, mirror::Class* root) REQUIRES_SHARED(Locks::mutator_lock_);
-  void ExitTransactionMode();
-  void RollbackAllTransactions() REQUIRES_SHARED(Locks::mutator_lock_);
+  EXPORT void EnterTransactionMode(bool strict, mirror::Class* root)
+      REQUIRES_SHARED(Locks::mutator_lock_);
+  EXPORT void ExitTransactionMode();
+  EXPORT void RollbackAllTransactions() REQUIRES_SHARED(Locks::mutator_lock_);
   // Transaction rollback and exit transaction are always done together, it's convenience to
   // do them in one function.
   void RollbackAndExitTransactionMode() REQUIRES_SHARED(Locks::mutator_lock_);
@@ -655,20 +662,19 @@ class Runtime {
                              MemberOffset field_offset,
                              int16_t value,
                              bool is_volatile);
-  void RecordWriteField32(mirror::Object* obj,
-                          MemberOffset field_offset,
-                          uint32_t value,
-                          bool is_volatile);
+  EXPORT void RecordWriteField32(mirror::Object* obj,
+                                 MemberOffset field_offset,
+                                 uint32_t value,
+                                 bool is_volatile);
   void RecordWriteField64(mirror::Object* obj,
                           MemberOffset field_offset,
                           uint64_t value,
                           bool is_volatile);
-  void RecordWriteFieldReference(mirror::Object* obj,
-                                 MemberOffset field_offset,
-                                 ObjPtr<mirror::Object> value,
-                                 bool is_volatile)
-      REQUIRES_SHARED(Locks::mutator_lock_);
-  void RecordWriteArray(mirror::Array* array, size_t index, uint64_t value)
+  EXPORT void RecordWriteFieldReference(mirror::Object* obj,
+                                        MemberOffset field_offset,
+                                        ObjPtr<mirror::Object> value,
+                                        bool is_volatile) REQUIRES_SHARED(Locks::mutator_lock_);
+  EXPORT void RecordWriteArray(mirror::Array* array, size_t index, uint64_t value)
       REQUIRES_SHARED(Locks::mutator_lock_);
   void RecordStrongStringInsertion(ObjPtr<mirror::String> s)
       REQUIRES(Locks::intern_table_lock_);
@@ -701,7 +707,7 @@ class Runtime {
 
   void DisableVerifier();
   bool IsVerificationEnabled() const;
-  bool IsVerificationSoftFail() const;
+  EXPORT bool IsVerificationSoftFail() const;
 
   void SetHiddenApiEnforcementPolicy(hiddenapi::EnforcementPolicy policy) {
     hidden_api_policy_ = policy;
@@ -821,7 +827,7 @@ class Runtime {
     return jit_arena_pool_.get();
   }
 
-  void ReclaimArenaPoolMemory();
+  EXPORT void ReclaimArenaPoolMemory();
 
   LinearAlloc* GetLinearAlloc() {
     return linear_alloc_.get();
@@ -860,10 +866,10 @@ class Runtime {
     return is_profileable_;
   }
 
-  void SetRuntimeDebugState(RuntimeDebugState state);
+  EXPORT void SetRuntimeDebugState(RuntimeDebugState state);
 
   // Deoptimize the boot image, called for Java debuggable apps.
-  void DeoptimizeBootImage() REQUIRES(Locks::mutator_lock_);
+  EXPORT void DeoptimizeBootImage() REQUIRES(Locks::mutator_lock_);
 
   bool IsNativeDebuggable() const {
     return is_native_debuggable_;
@@ -900,8 +906,7 @@ class Runtime {
   void SetSentinel(ObjPtr<mirror::Object> sentinel) REQUIRES_SHARED(Locks::mutator_lock_);
   // For testing purpose only.
   // TODO: Remove this when this is no longer needed (b/116087961).
-  GcRoot<mirror::Object> GetSentinel() REQUIRES_SHARED(Locks::mutator_lock_);
-
+  EXPORT GcRoot<mirror::Object> GetSentinel() REQUIRES_SHARED(Locks::mutator_lock_);
 
   // Use a sentinel for marking entries in a table that have been cleared.
   // This helps diagnosing in case code tries to wrongly access such
@@ -911,7 +916,7 @@ class Runtime {
   }
 
   // Create a normal LinearAlloc or low 4gb version if we are 64 bit AOT compiler.
-  LinearAlloc* CreateLinearAlloc();
+  EXPORT LinearAlloc* CreateLinearAlloc();
   // Setup linear-alloc allocators to stop using the current arena so that the
   // next allocations, which would be after zygote fork, happens in userfaultfd
   // visited space.
@@ -938,7 +943,7 @@ class Runtime {
     return dump_native_stack_on_sig_quit_;
   }
 
-  void UpdateProcessState(ProcessState process_state);
+  EXPORT void UpdateProcessState(ProcessState process_state);
 
   // Returns true if we currently care about long mutator pause.
   bool InJankPerceptibleProcessState() const {
@@ -957,7 +962,7 @@ class Runtime {
 
   // Returns if the code can be deoptimized asynchronously. Code may be compiled with some
   // optimization that makes it impossible to deoptimize.
-  bool IsAsyncDeoptimizeable(ArtMethod* method, uintptr_t code) const
+  EXPORT bool IsAsyncDeoptimizeable(ArtMethod* method, uintptr_t code) const
       REQUIRES_SHARED(Locks::mutator_lock_);
 
   // Returns a saved copy of the environment (getenv/setenv values).
@@ -966,16 +971,16 @@ class Runtime {
     return env_snapshot_.GetSnapshot();
   }
 
-  void AddSystemWeakHolder(gc::AbstractSystemWeakHolder* holder);
-  void RemoveSystemWeakHolder(gc::AbstractSystemWeakHolder* holder);
+  EXPORT void AddSystemWeakHolder(gc::AbstractSystemWeakHolder* holder);
+  EXPORT void RemoveSystemWeakHolder(gc::AbstractSystemWeakHolder* holder);
 
-  void AttachAgent(JNIEnv* env, const std::string& agent_arg, jobject class_loader);
+  EXPORT void AttachAgent(JNIEnv* env, const std::string& agent_arg, jobject class_loader);
 
   const std::list<std::unique_ptr<ti::Agent>>& GetAgents() const {
     return agents_;
   }
 
-  RuntimeCallbacks* GetRuntimeCallbacks();
+  EXPORT RuntimeCallbacks* GetRuntimeCallbacks();
 
   bool HasLoadedPlugins() const {
     return !plugins_.empty();
@@ -1038,7 +1043,7 @@ class Runtime {
 
   // Changes the JniIdType to the given type. Only allowed if CanSetJniIdType(). All threads must be
   // suspended to call this function.
-  void SetJniIdType(JniIdType t);
+  EXPORT void SetJniIdType(JniIdType t);
 
   uint32_t GetVerifierLoggingThresholdMs() const {
     return verifier_logging_threshold_ms_;
@@ -1080,7 +1085,7 @@ class Runtime {
 
   // Reset the startup completed status so that we can call NotifyStartupCompleted again. Should
   // only be used for testing.
-  void ResetStartupCompleted();
+  EXPORT void ResetStartupCompleted();
 
   // Notify the runtime that application startup is considered completed. Only has effect for the
   // first call. Returns whether this was the first call.
@@ -1091,7 +1096,7 @@ class Runtime {
   void NotifyDexFileLoaded();
 
   // Return true if startup is already completed.
-  bool GetStartupCompleted() const;
+  EXPORT bool GetStartupCompleted() const;
 
   bool IsVerifierMissingKThrowFatal() const {
     return verifier_missing_kthrow_fatal_;
@@ -1229,8 +1234,10 @@ class Runtime {
 
   void AppendToBootClassPath(const std::string& filename, const std::string& location);
 
+  // Don't use EXPORT ("default" visibility), because quick_entrypoints_x86.o
+  // refers to this symbol and it can't link with R_386_PC32 relocation.
   // A pointer to the active runtime or null.
-  static Runtime* instance_;
+  LIBART_PROTECTED static Runtime* instance_;
 
   // NOTE: these must match the gc::ProcessState values as they come directly from the framework.
   static constexpr int kProfileForground = 0;

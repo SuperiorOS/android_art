@@ -94,22 +94,20 @@ static void WriteMinidebugInfo(const std::vector<uint8_t>& input, std::vector<ui
   auto* debug_frame = builder->GetDebugFrame();
   debug_frame->Start();
   {
-    std::map<std::basic_string_view<uint8_t>, Elf_Addr> cie_dedup;
+    std::map<std::string_view, Elf_Addr> cie_dedup;
     std::unordered_map<const CIE*, Elf_Addr> new_cie_offset;
     std::deque<std::pair<const FDE*, const CIE*>> entries;
     // Read, de-duplicate and write CIE entries.  Read FDE entries.
     reader.VisitDebugFrame(
         [&](const CIE* cie) {
-          std::basic_string_view<uint8_t> key(cie->data(), cie->size());
+          std::string_view key(reinterpret_cast<const char*>(cie->data()), cie->size());
           auto it = cie_dedup.emplace(key, debug_frame->GetPosition());
           if (/* inserted */ it.second) {
             debug_frame->WriteFully(cie->data(), cie->size());
           }
           new_cie_offset[cie] = it.first->second;
         },
-        [&](const FDE* fde, const CIE* cie) {
-          entries.emplace_back(std::make_pair(fde, cie));
-        });
+        [&](const FDE* fde, const CIE* cie) { entries.emplace_back(std::make_pair(fde, cie)); });
     // Sort FDE entries by opcodes to improve locality for compression (saves ~25%).
     std::stable_sort(entries.begin(), entries.end(), [](const auto& lhs, const auto& rhs) {
       constexpr size_t opcode_offset = sizeof(FDE);

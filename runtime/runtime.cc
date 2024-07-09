@@ -42,7 +42,6 @@
 
 #include "android-base/strings.h"
 
-#include "aot_class_linker.h"
 #include "arch/arm/registers_arm.h"
 #include "arch/arm64/registers_arm64.h"
 #include "arch/context.h"
@@ -76,7 +75,6 @@
 #include "debugger.h"
 #include "dex/art_dex_file_loader.h"
 #include "dex/dex_file_loader.h"
-#include "elf_file.h"
 #include "entrypoints/runtime_asm_entrypoints.h"
 #include "entrypoints/entrypoint_utils-inl.h"
 #include "experimental_flags.h"
@@ -90,7 +88,6 @@
 #include "gc/task_processor.h"
 #include "handle_scope-inl.h"
 #include "hidden_api.h"
-#include "image-inl.h"
 #include "indirect_reference_table.h"
 #include "instrumentation.h"
 #include "intern_table-inl.h"
@@ -156,9 +153,12 @@
 #include "native_stack_dump.h"
 #include "nativehelper/scoped_local_ref.h"
 #include "nterp_helpers.h"
-#include "oat.h"
-#include "oat_file_manager.h"
-#include "oat_quick_method_header.h"
+#include "oat/aot_class_linker.h"
+#include "oat/elf_file.h"
+#include "oat/image-inl.h"
+#include "oat/oat.h"
+#include "oat/oat_file_manager.h"
+#include "oat/oat_quick_method_header.h"
 #include "object_callbacks.h"
 #include "odr_statslog/odr_statslog.h"
 #include "parsed_options.h"
@@ -195,7 +195,7 @@ namespace apex = com::android::apex;
 #include "asm_defines.def"
 #undef ASM_DEFINE
 
-namespace art {
+namespace art HIDDEN {
 
 // If a signal isn't handled properly, enable a handler that attempts to dump the Java stack.
 static constexpr bool kEnableJavaStackTraceHandler = false;
@@ -205,6 +205,12 @@ static constexpr double kLowMemoryMinLoadFactor = 0.5;
 static constexpr double kLowMemoryMaxLoadFactor = 0.8;
 static constexpr double kNormalMinLoadFactor = 0.4;
 static constexpr double kNormalMaxLoadFactor = 0.7;
+
+#ifdef ART_PAGE_SIZE_AGNOSTIC
+// Declare the constant as ALWAYS_HIDDEN to ensure it isn't visible from outside libart.so.
+const size_t PageSize::value_ ALWAYS_HIDDEN = GetPageSizeSlow();
+PageSize gPageSize ALWAYS_HIDDEN;
+#endif
 
 Runtime* Runtime::instance_ = nullptr;
 
@@ -228,7 +234,7 @@ inline char** GetEnviron() {
 #else
 // Some POSIX platforms expect you to declare environ. extern "C" makes
 // it reside in the global namespace.
-extern "C" char** environ;
+EXPORT extern "C" char** environ;
 inline char** GetEnviron() { return environ; }
 #endif
 
@@ -548,6 +554,12 @@ Runtime::~Runtime() {
   // instance. We rely on a small initialization order issue in Runtime::Start() that requires
   // elements of WellKnownClasses to be null, see b/65500943.
   WellKnownClasses::Clear();
+
+#ifdef ART_PAGE_SIZE_AGNOSTIC
+  // This is added to ensure no test is able to access gPageSize prior to initializing Runtime just
+  // because a Runtime instance was created (and subsequently destroyed) by another test.
+  gPageSize.DisallowAccess();
+#endif
 }
 
 struct AbortState {
@@ -646,21 +658,24 @@ struct AbortState {
   }
 };
 
-void Runtime::Abort(const char* msg) {
+void Runtime::SetAbortMessage(const char* msg) {
   auto old_value = gAborting.fetch_add(1);  // set before taking any locks
 
   // Only set the first abort message.
   if (old_value == 0) {
 #ifdef ART_TARGET_ANDROID
     android_set_abort_message(msg);
-#else
+#endif
     // Set the runtime fault message in case our unexpected-signal code will run.
     Runtime* current = Runtime::Current();
     if (current != nullptr) {
       current->SetFaultMessage(msg);
     }
-#endif
   }
+}
+
+void Runtime::Abort(const char* msg) {
+  SetAbortMessage(msg);
 
   // May be coming from an unattached thread.
   if (Thread::Current() == nullptr) {
@@ -1247,7 +1262,8 @@ void Runtime::InitNonZygoteOrPostFork(
         std::min(static_cast<size_t>(std::thread::hardware_concurrency()), kMaxRuntimeWorkers);
     MutexLock mu(Thread::Current(), *Locks::runtime_thread_pool_lock_);
     CHECK(thread_pool_ == nullptr);
-    thread_pool_.reset(new ThreadPool("Runtime", num_workers, /*create_peers=*/false, kStackSize));
+    thread_pool_.reset(
+        ThreadPool::Create("Runtime", num_workers, /*create_peers=*/false, kStackSize));
     thread_pool_->StartWorkers(Thread::Current());
   }
 
@@ -1491,6 +1507,10 @@ bool Runtime::Init(RuntimeArgumentMap&& runtime_options_in) {
   // (b/30160149): protect subprocesses from modifications to LD_LIBRARY_PATH, etc.
   // Take a snapshot of the environment at the time the runtime was created, for use by Exec, etc.
   env_snapshot_.TakeSnapshot();
+
+#ifdef ART_PAGE_SIZE_AGNOSTIC
+  gPageSize.AllowAccess();
+#endif
 
   using Opt = RuntimeArgumentMap;
   Opt runtime_options(std::move(runtime_options_in));
@@ -2361,7 +2381,7 @@ void Runtime::RegisterRuntimeNativeMethods(JNIEnv* env) {
   register_dalvik_system_DexFile(env);
   register_dalvik_system_BaseDexClassLoader(env);
   register_dalvik_system_VMDebug(env);
-  register_dalvik_system_VMRuntime(env);
+  real_register_dalvik_system_VMRuntime(env);
   register_dalvik_system_VMStack(env);
   register_dalvik_system_ZygoteHooks(env);
   register_java_lang_Class(env);
@@ -2614,6 +2634,9 @@ void Runtime::VisitConcurrentRoots(RootVisitor* visitor, VisitRootFlags flags) {
   }
   jni_id_manager_->VisitRoots(visitor);
   heap_->VisitAllocationRecords(visitor);
+  if (jit_ != nullptr) {
+    jit_->VisitRoots(visitor);
+  }
   if ((flags & kVisitRootFlagNewRoots) == 0) {
     // Guaranteed to have no new roots in the constant roots.
     VisitConstantRoots(visitor);

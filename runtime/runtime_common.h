@@ -31,10 +31,11 @@
 #include <iomanip>
 
 #include "base/dumpable.h"
+#include "base/macros.h"
 #include "base/utils.h"
 #include "native_stack_dump.h"
 
-namespace art {
+namespace art HIDDEN {
 
 struct Backtrace {
  public:

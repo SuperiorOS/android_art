@@ -22,7 +22,7 @@
 #include "base/macros.h"
 #include "obj_ptr.h"
 
-namespace art {
+namespace art HIDDEN {
 
 namespace mirror {
 class Class;
@@ -36,7 +36,7 @@ enum VerifyObjectMode {
   kVerifyObjectModeAll  // Check heap accesses thoroughly.
 };
 
-enum VerifyObjectFlags {
+enum EXPORT VerifyObjectFlags {
   kVerifyNone = 0x0,
   // Verify self when we are doing an operation.
   kVerifyThis = 0x1,

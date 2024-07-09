@@ -101,6 +101,27 @@ class DataType {
     }
   }
 
+  static constexpr Type SignedIntegralTypeFromSize(size_t size) {
+    switch (size) {
+      case 0:
+      case 1:
+        return Type::kInt8;
+      case 2:
+        return Type::kInt16;
+      case 3:
+      case 4:
+        return Type::kInt32;
+      case 5:
+      case 6:
+      case 7:
+      case 8:
+        return Type::kInt64;
+      default:
+        LOG(FATAL) << "Invalid size " << size;
+        UNREACHABLE();
+    }
+  }
+
   static bool IsFloatingPointType(Type type) {
     return type == Type::kFloat32 || type == Type::kFloat64;
   }

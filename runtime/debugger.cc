@@ -68,7 +68,7 @@
 #include "mirror/throwable.h"
 #include "nativehelper/scoped_local_ref.h"
 #include "nativehelper/scoped_primitive_array.h"
-#include "oat_file.h"
+#include "oat/oat_file.h"
 #include "obj_ptr-inl.h"
 #include "reflection.h"
 #include "reflective_handle.h"
@@ -83,7 +83,7 @@
 #include "thread_pool.h"
 #include "well_known_classes.h"
 
-namespace art {
+namespace art HIDDEN {
 
 using android::base::StringPrintf;
 
@@ -340,7 +340,11 @@ void Dbg::DdmSetThreadNotification(bool enable) {
       Dbg::DdmSendThreadNotification(thread, CHUNK_TYPE("THCR"));
       finish_barrier.Pass(cls_self);
     });
-    size_t checkpoints = Runtime::Current()->GetThreadList()->RunCheckpoint(&fc);
+    // TODO(b/253671779): The above eventually results in calls to EventHandler::DispatchEvent,
+    // which does a ScopedThreadStateChange, which amounts to a thread state change inside the
+    // checkpoint run method. Hence the normal check would fail, and thus we specify Unchecked
+    // here.
+    size_t checkpoints = Runtime::Current()->GetThreadList()->RunCheckpointUnchecked(&fc);
     ScopedThreadSuspension sts(self, ThreadState::kWaitingForCheckPointsToRun);
     finish_barrier.Increment(self, checkpoints);
   }

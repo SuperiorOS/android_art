@@ -21,7 +21,7 @@
 #include "dex/art_dex_file_loader.h"
 #include "mirror/class-inl.h"
 
-namespace art {
+namespace art HIDDEN {
 
 SdkChecker::SdkChecker() : enabled_(true) {}
 

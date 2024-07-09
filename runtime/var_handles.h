@@ -17,9 +17,10 @@
 #ifndef ART_RUNTIME_VAR_HANDLES_H_
 #define ART_RUNTIME_VAR_HANDLES_H_
 
+#include "base/macros.h"
 #include "mirror/var_handle.h"
 
-namespace art {
+namespace art HIDDEN {
 
 namespace mirror {
 class RawMethodType;

@@ -28,7 +28,7 @@
 #include "mirror/reference.h"
 #include "runtime.h"
 
-namespace art {
+namespace art HIDDEN {
 
 template <typename MirrorType, bool kIsVolatile, ReadBarrierOption kReadBarrierOption,
           bool kAlwaysUpdateField>

@@ -497,9 +497,8 @@ class CriticalPathSchedulingNodeSelector : public SchedulingNodeSelector {
 
 class HScheduler {
  public:
-  HScheduler(SchedulingLatencyVisitor* latency_visitor, SchedulingNodeSelector* selector)
-      : latency_visitor_(latency_visitor),
-        selector_(selector),
+  explicit HScheduler(SchedulingNodeSelector* selector)
+      : selector_(selector),
         only_optimize_loop_blocks_(true),
         cursor_(nullptr) {}
   virtual ~HScheduler() {}
@@ -512,6 +511,35 @@ class HScheduler {
   virtual bool IsSchedulingBarrier(const HInstruction* instruction) const;
 
  protected:
+  virtual std::pair<SchedulingGraph, ScopedArenaVector<SchedulingNode*>> BuildSchedulingGraph(
+      HBasicBlock* block,
+      ScopedArenaAllocator* allocator,
+      const HeapLocationCollector* heap_location_collector) = 0;
+
+  template <typename LatencyVisitor>
+  std::pair<SchedulingGraph, ScopedArenaVector<SchedulingNode*>> BuildSchedulingGraph(
+      HBasicBlock* block,
+      ScopedArenaAllocator* allocator,
+      const HeapLocationCollector* heap_location_collector,
+      LatencyVisitor* latency_visitor) ALWAYS_INLINE {
+    SchedulingGraph scheduling_graph(allocator, heap_location_collector);
+    ScopedArenaVector<SchedulingNode*> scheduling_nodes(allocator->Adapter(kArenaAllocScheduler));
+    for (HBackwardInstructionIterator it(block->GetInstructions()); !it.Done(); it.Advance()) {
+      HInstruction* instruction = it.Current();
+      CHECK_EQ(instruction->GetBlock(), block)
+          << instruction->DebugName()
+          << " is in block " << instruction->GetBlock()->GetBlockId()
+          << ", and expected in block " << block->GetBlockId();
+      SchedulingNode* node =
+          scheduling_graph.AddNode(instruction, IsSchedulingBarrier(instruction));
+      latency_visitor->CalculateLatency(node);
+      node->SetLatency(latency_visitor->GetLastVisitedLatency());
+      node->SetInternalLatency(latency_visitor->GetLastVisitedInternalLatency());
+      scheduling_nodes.push_back(node);
+    }
+    return {std::move(scheduling_graph), std::move(scheduling_nodes)};
+  }
+
   void Schedule(HBasicBlock* block, const HeapLocationCollector* heap_location_collector);
   void Schedule(SchedulingNode* scheduling_node,
                 /*inout*/ ScopedArenaVector<SchedulingNode*>* candidates);
@@ -529,13 +557,6 @@ class HScheduler {
   virtual bool IsSchedulable(const HInstruction* instruction) const;
   bool IsSchedulable(const HBasicBlock* block) const;
 
-  void CalculateLatency(SchedulingNode* node) {
-    latency_visitor_->CalculateLatency(node);
-    node->SetLatency(latency_visitor_->GetLastVisitedLatency());
-    node->SetInternalLatency(latency_visitor_->GetLastVisitedInternalLatency());
-  }
-
-  SchedulingLatencyVisitor* const latency_visitor_;
   SchedulingNodeSelector* const selector_;
   bool only_optimize_loop_blocks_;
 

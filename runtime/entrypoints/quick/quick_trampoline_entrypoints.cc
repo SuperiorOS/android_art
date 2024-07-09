@@ -47,9 +47,9 @@
 #include "mirror/object-inl.h"
 #include "mirror/object_array-inl.h"
 #include "mirror/var_handle.h"
-#include "oat.h"
-#include "oat_file.h"
-#include "oat_quick_method_header.h"
+#include "oat/oat.h"
+#include "oat/oat_file.h"
+#include "oat/oat_quick_method_header.h"
 #include "quick_exception_handler.h"
 #include "runtime.h"
 #include "scoped_thread_state_change-inl.h"
@@ -58,7 +58,7 @@
 #include "var_handles.h"
 #include "well_known_classes.h"
 
-namespace art {
+namespace art HIDDEN {
 
 extern "C" NO_RETURN void artDeoptimizeFromCompiledCode(DeoptimizationKind kind, Thread* self);
 extern "C" NO_RETURN void artDeoptimize(Thread* self, bool skip_method_exit_callbacks);
@@ -943,9 +943,8 @@ class GetQuickReferenceArgumentAtVisitor final : public QuickArgumentVisitor {
 
 // Returning reference argument at position `arg_pos` in Quick stack frame at address `sp`.
 // NOTE: Only used for testing purposes.
-extern "C" StackReference<mirror::Object>* artQuickGetProxyReferenceArgumentAt(size_t arg_pos,
-                                                                               ArtMethod** sp)
-    REQUIRES_SHARED(Locks::mutator_lock_) {
+EXPORT extern "C" StackReference<mirror::Object>* artQuickGetProxyReferenceArgumentAt(
+    size_t arg_pos, ArtMethod** sp) REQUIRES_SHARED(Locks::mutator_lock_) {
   ArtMethod* proxy_method = *sp;
   ArtMethod* non_proxy_method = proxy_method->GetInterfaceMethodIfProxy(kRuntimePointerSize);
   CHECK(!non_proxy_method->IsStatic())
@@ -2046,13 +2045,12 @@ extern "C" const void* artQuickGenericJniTrampoline(Thread* self,
         << "@FastNative/@CriticalNative and synchronize is not supported";
   }
 
-  // Skip pushing IRT frame for @CriticalNative.
+  // Skip pushing LRT frame for @CriticalNative.
   if (LIKELY(!critical_native)) {
     // Push local reference frame.
     JNIEnvExt* env = self->GetJniEnv();
     DCHECK(env != nullptr);
-    uint32_t cookie = bit_cast<uint32_t>(env->GetLocalRefCookie());
-    env->SetLocalRefCookie(env->GetLocalsSegmentState());
+    uint32_t cookie = bit_cast<uint32_t>(env->PushLocalReferenceFrame());
 
     // Save the cookie on the stack.
     uint32_t* sp32 = reinterpret_cast<uint32_t*>(managed_sp);
@@ -2522,6 +2520,11 @@ extern "C" void artJniMethodEntryHook(Thread* self)
 extern "C" void artMethodEntryHook(ArtMethod* method, Thread* self, ArtMethod** sp)
     REQUIRES_SHARED(Locks::mutator_lock_) {
   instrumentation::Instrumentation* instr = Runtime::Current()->GetInstrumentation();
+  if (instr->HasFastMethodEntryListenersOnly()) {
+    instr->MethodEnterEvent(self, method);
+    return;
+  }
+
   if (instr->HasMethodEntryListeners()) {
     instr->MethodEnterEvent(self, method);
     // MethodEnter callback could have requested a deopt for ex: by setting a breakpoint, so
@@ -2552,7 +2555,7 @@ extern "C" void artMethodExitHook(Thread* self,
   DCHECK(instr->RunExitHooks());
 
   ArtMethod* method = *sp;
-  if (instr->HasFastMethodExitListeners()) {
+  if (instr->HasFastMethodExitListenersOnly()) {
     // Fast method listeners are only used for tracing which don't need any deoptimization checks
     // or a return value.
     JValue return_value;

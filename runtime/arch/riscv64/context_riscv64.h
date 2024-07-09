@@ -25,7 +25,7 @@
 #include "base/macros.h"
 #include "registers_riscv64.h"
 
-namespace art {
+namespace art HIDDEN {
 namespace riscv64 {
 
 class Riscv64Context final : public Context {
@@ -42,9 +42,7 @@ class Riscv64Context final : public Context {
 
   void SetPC(uintptr_t new_pc) override { SetGPR(kPC, new_pc); }
 
-  void SetNterpDexPC(uintptr_t /*dex_pc_ptr*/) override {
-    UNREACHABLE();  // Nterp is not supported on RISC-V  yet
-  }
+  void SetNterpDexPC(uintptr_t dex_pc_ptr) override { SetGPR(S3, dex_pc_ptr); }
 
   void SetArg0(uintptr_t new_arg0_value) override { SetGPR(A0, new_arg0_value); }
 

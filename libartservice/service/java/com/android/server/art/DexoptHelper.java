@@ -28,7 +28,6 @@ import android.content.Context;
 import android.os.Binder;
 import android.os.Build;
 import android.os.CancellationSignal;
-import android.os.PowerManager;
 import android.os.RemoteException;
 import android.os.WorkSource;
 
@@ -71,12 +70,6 @@ import java.util.stream.Collectors;
 @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
 public class DexoptHelper {
     private static final String TAG = ArtManagerLocal.TAG;
-
-    /**
-     * Timeout of the wake lock. This is required by AndroidLint, but we set it to a very large
-     * value so that it should normally never triggered.
-     */
-    private static final long WAKE_LOCK_TIMEOUT_MS = TimeUnit.DAYS.toMillis(1);
 
     @NonNull private final Injector mInjector;
 
@@ -127,17 +120,10 @@ public class DexoptHelper {
             @NonNull DexoptParams params, @NonNull CancellationSignal cancellationSignal,
             @NonNull Executor dexoptExecutor, @Nullable Executor progressCallbackExecutor,
             @Nullable Consumer<OperationProgress> progressCallback) {
-        int callingUid = Binder.getCallingUid();
+        // TODO(jiakaiz): Find out whether this is still needed.
         long identityToken = Binder.clearCallingIdentity();
-        PowerManager.WakeLock wakeLock = null;
 
         try {
-            // Acquire a wake lock.
-            PowerManager powerManager = mInjector.getPowerManager();
-            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, TAG);
-            wakeLock.setWorkSource(new WorkSource(callingUid));
-            wakeLock.acquire(WAKE_LOCK_TIMEOUT_MS);
-
             List<CompletableFuture<PackageDexoptResult>> futures = new ArrayList<>();
 
             // Child threads will set their own listeners on the cancellation signal, so we must
@@ -205,9 +191,6 @@ public class DexoptHelper {
 
             return result;
         } finally {
-            if (wakeLock != null) {
-                wakeLock.release();
-            }
             Binder.restoreCallingIdentity(identityToken);
             // Make sure nothing leaks even if the caller holds `cancellationSignal` forever.
             cancellationSignal.setOnCancelListener(null);
@@ -340,31 +323,27 @@ public class DexoptHelper {
             // Call the getters for the dependencies that aren't optional, to ensure correct
             // initialization order.
             getAppHibernationManager();
-            getPowerManager();
         }
 
         @NonNull
         PrimaryDexopter getPrimaryDexopter(@NonNull PackageState pkgState,
                 @NonNull AndroidPackage pkg, @NonNull DexoptParams params,
                 @NonNull CancellationSignal cancellationSignal) {
-            return new PrimaryDexopter(mContext, pkgState, pkg, params, cancellationSignal);
+            return new PrimaryDexopter(
+                    mContext, mConfig, pkgState, pkg, params, cancellationSignal);
         }
 
         @NonNull
         SecondaryDexopter getSecondaryDexopter(@NonNull PackageState pkgState,
                 @NonNull AndroidPackage pkg, @NonNull DexoptParams params,
                 @NonNull CancellationSignal cancellationSignal) {
-            return new SecondaryDexopter(mContext, pkgState, pkg, params, cancellationSignal);
+            return new SecondaryDexopter(
+                    mContext, mConfig, pkgState, pkg, params, cancellationSignal);
         }
 
         @NonNull
         public AppHibernationManager getAppHibernationManager() {
             return Objects.requireNonNull(mContext.getSystemService(AppHibernationManager.class));
-        }
-
-        @NonNull
-        public PowerManager getPowerManager() {
-            return Objects.requireNonNull(mContext.getSystemService(PowerManager.class));
         }
 
         @NonNull

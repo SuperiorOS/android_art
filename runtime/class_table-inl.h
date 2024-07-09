@@ -23,10 +23,10 @@
 #include "dex/utf.h"
 #include "gc_root-inl.h"
 #include "mirror/class.h"
-#include "oat_file.h"
+#include "oat/oat_file.h"
 #include "obj_ptr-inl.h"
 
-namespace art {
+namespace art HIDDEN {
 
 inline ClassTable::TableSlot::TableSlot(ObjPtr<mirror::Class> klass)
     : TableSlot(klass, klass->DescriptorHash()) {}

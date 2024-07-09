@@ -29,8 +29,8 @@
 #include "lock_word.h"
 #include "mirror/array-inl.h"
 #include "mirror/object.h"
-#include "oat.h"
-#include "oat_quick_method_header.h"
+#include "oat/oat.h"
+#include "oat/oat_quick_method_header.h"
 #include "read_barrier.h"
 #include "stream/output_stream.h"
 
@@ -71,6 +71,7 @@ inline bool IsAdrpPatch(const LinkerPatch& patch) {
     case LinkerPatch::Type::kPackageTypeBssEntry:
     case LinkerPatch::Type::kStringRelative:
     case LinkerPatch::Type::kStringBssEntry:
+    case LinkerPatch::Type::kMethodTypeBssEntry:
       return patch.LiteralOffset() == patch.PcInsnOffset();
   }
 }

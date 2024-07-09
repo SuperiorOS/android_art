@@ -316,16 +316,11 @@ bool ReferenceTypePropagation::Run() {
 
 void ReferenceTypePropagation::RTPVisitor::VisitBasicBlock(HBasicBlock* block) {
   // Handle Phis first as there might be instructions in the same block who depend on them.
-  for (HInstructionIterator it(block->GetPhis()); !it.Done(); it.Advance()) {
-    VisitPhi(it.Current()->AsPhi());
-  }
+  VisitPhis(block);
 
   // Handle instructions. Since RTP may add HBoundType instructions just after the
   // last visited instruction, use `HInstructionIteratorHandleChanges` iterator.
-  for (HInstructionIteratorHandleChanges it(block->GetInstructions()); !it.Done(); it.Advance()) {
-    HInstruction* instr = it.Current();
-    instr->Accept(this);
-  }
+  VisitNonPhiInstructions(block);
 
   // Add extra nodes to bound types.
   BoundTypeForIfNotNull(block);

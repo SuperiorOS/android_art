@@ -264,6 +264,8 @@ DISABLED_GCSTRESS_DEBUG_TESTS = {
   "test.java.lang.StrictMath.HypotTests#testAgainstTranslit_shard4",
   "test.java.math.BigDecimal",
   "test.java.math.BigInteger#testConstructor",
+  "test.java.util.TestFormatter",
+  "test.java.util.Collection",
 }
 
 DISABLED_FUGU_TESTS = {

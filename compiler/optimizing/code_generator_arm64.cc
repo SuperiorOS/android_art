@@ -37,6 +37,7 @@
 #include "intrinsics_arm64.h"
 #include "intrinsics_list.h"
 #include "intrinsics_utils.h"
+#include "jit/profiling_info.h"
 #include "linker/linker_patch.h"
 #include "lock_word.h"
 #include "mirror/array-inl.h"
@@ -45,6 +46,7 @@
 #include "offsets.h"
 #include "optimizing/common_arm64.h"
 #include "optimizing/nodes.h"
+#include "profiling_info_builder.h"
 #include "thread.h"
 #include "trace.h"
 #include "utils/arm64/assembler_arm64.h"
@@ -846,8 +848,8 @@ class MethodEntryExitHooksSlowPathARM64 : public SlowPathCodeARM64 {
 
 class CompileOptimizedSlowPathARM64 : public SlowPathCodeARM64 {
  public:
-  explicit CompileOptimizedSlowPathARM64(Register profiling_info)
-      : SlowPathCodeARM64(/* instruction= */ nullptr),
+  CompileOptimizedSlowPathARM64(HSuspendCheck* check, Register profiling_info)
+      : SlowPathCodeARM64(check),
         profiling_info_(profiling_info) {}
 
   void EmitNativeCode(CodeGenerator* codegen) override {
@@ -860,10 +862,18 @@ class CompileOptimizedSlowPathARM64 : public SlowPathCodeARM64 {
     __ Mov(counter, ProfilingInfo::GetOptimizeThreshold());
     __ Strh(counter,
             MemOperand(profiling_info_, ProfilingInfo::BaselineHotnessCountOffset().Int32Value()));
+    if (instruction_ != nullptr) {
+      // Only saves live vector regs for SIMD.
+      SaveLiveRegisters(codegen, instruction_->GetLocations());
+    }
     __ Ldr(lr, MemOperand(tr, entrypoint_offset));
     // Note: we don't record the call here (and therefore don't generate a stack
     // map), as the entrypoint should never be suspended.
     __ Blr(lr);
+    if (instruction_ != nullptr) {
+      // Only restores live vector regs for SIMD.
+      RestoreLiveRegisters(codegen, instruction_->GetLocations());
+    }
     __ B(GetExitLabel());
   }
 
@@ -1279,7 +1289,7 @@ void InstructionCodeGeneratorARM64::VisitMethodEntryHook(HMethodEntryHook* instr
   GenerateMethodEntryExitHook(instruction);
 }
 
-void CodeGeneratorARM64::MaybeIncrementHotness(bool is_frame_entry) {
+void CodeGeneratorARM64::MaybeIncrementHotness(HSuspendCheck* suspend_check, bool is_frame_entry) {
   MacroAssembler* masm = GetVIXLAssembler();
   if (GetCompilerOptions().CountHotnessInCompiledCode()) {
     UseScratchRegisterScope temps(masm);
@@ -1297,16 +1307,17 @@ void CodeGeneratorARM64::MaybeIncrementHotness(bool is_frame_entry) {
     __ Bind(&done);
   }
 
-  if (GetGraph()->IsCompilingBaseline() && !Runtime::Current()->IsAotCompiler()) {
+  if (GetGraph()->IsCompilingBaseline() &&
+      GetGraph()->IsUsefulOptimizing() &&
+      !Runtime::Current()->IsAotCompiler()) {
     ProfilingInfo* info = GetGraph()->GetProfilingInfo();
     DCHECK(info != nullptr);
     DCHECK(!HasEmptyFrame());
     uint64_t address = reinterpret_cast64<uint64_t>(info);
-    vixl::aarch64::Label done;
     UseScratchRegisterScope temps(masm);
     Register counter = temps.AcquireW();
-    SlowPathCodeARM64* slow_path =
-        new (GetScopedAllocator()) CompileOptimizedSlowPathARM64(/* profiling_info= */ lr);
+    SlowPathCodeARM64* slow_path = new (GetScopedAllocator()) CompileOptimizedSlowPathARM64(
+        suspend_check, /* profiling_info= */ lr);
     AddSlowPath(slow_path);
     __ Ldr(lr, jit_patches_.DeduplicateUint64Literal(address));
     __ Ldrh(counter, MemOperand(lr, ProfilingInfo::BaselineHotnessCountOffset().Int32Value()));
@@ -1387,6 +1398,9 @@ void CodeGeneratorARM64::GenerateFrameEntry() {
   }
 
   if (!HasEmptyFrame()) {
+    // Make sure the frame size isn't unreasonably large.
+    DCHECK_LE(GetFrameSize(), GetMaximumFrameSize());
+
     // Stack layout:
     //      sp[frame_size - 8]        : lr.
     //      ...                       : other preserved core registers.
@@ -1430,7 +1444,7 @@ void CodeGeneratorARM64::GenerateFrameEntry() {
       __ Str(wzr, MemOperand(sp, GetStackOffsetOfShouldDeoptimizeFlag()));
     }
   }
-  MaybeIncrementHotness(/* is_frame_entry= */ true);
+  MaybeIncrementHotness(/* suspend_check= */ nullptr, /* is_frame_entry= */ true);
   MaybeGenerateMarkingRegisterCheck(/* code= */ __LINE__);
 }
 
@@ -1498,18 +1512,24 @@ void CodeGeneratorARM64::AddLocationAsTemp(Location location, LocationSummary* l
   }
 }
 
-void CodeGeneratorARM64::MarkGCCard(Register object, Register value, bool emit_null_check) {
-  UseScratchRegisterScope temps(GetVIXLAssembler());
-  Register card = temps.AcquireX();
-  Register temp = temps.AcquireW();   // Index within the CardTable - 32bit.
+void CodeGeneratorARM64::MaybeMarkGCCard(Register object, Register value, bool emit_null_check) {
   vixl::aarch64::Label done;
   if (emit_null_check) {
     __ Cbz(value, &done);
   }
+  MarkGCCard(object);
+  if (emit_null_check) {
+    __ Bind(&done);
+  }
+}
+
+void CodeGeneratorARM64::MarkGCCard(Register object) {
+  UseScratchRegisterScope temps(GetVIXLAssembler());
+  Register card = temps.AcquireX();
+  Register temp = temps.AcquireW();  // Index within the CardTable - 32bit.
   // Load the address of the card table into `card`.
   __ Ldr(card, MemOperand(tr, Thread::CardTableOffset<kArm64PointerSize>().Int32Value()));
-  // Calculate the offset (in the card table) of the card corresponding to
-  // `object`.
+  // Calculate the offset (in the card table) of the card corresponding to `object`.
   __ Lsr(temp, object, gc::accounting::CardTable::kCardShift);
   // Write the `art::gc::accounting::CardTable::kCardDirty` value into the
   // `object`'s card.
@@ -1525,9 +1545,24 @@ void CodeGeneratorARM64::MarkGCCard(Register object, Register value, bool emit_n
   // of the card to mark; and 2. to load the `kCardDirty` value) saves a load
   // (no need to explicitly load `kCardDirty` as an immediate value).
   __ Strb(card, MemOperand(card, temp.X()));
-  if (emit_null_check) {
-    __ Bind(&done);
-  }
+}
+
+void CodeGeneratorARM64::CheckGCCardIsValid(Register object) {
+  UseScratchRegisterScope temps(GetVIXLAssembler());
+  Register card = temps.AcquireX();
+  Register temp = temps.AcquireW();  // Index within the CardTable - 32bit.
+  vixl::aarch64::Label done;
+  // Load the address of the card table into `card`.
+  __ Ldr(card, MemOperand(tr, Thread::CardTableOffset<kArm64PointerSize>().Int32Value()));
+  // Calculate the offset (in the card table) of the card corresponding to `object`.
+  __ Lsr(temp, object, gc::accounting::CardTable::kCardShift);
+  // assert (!clean || !self->is_gc_marking)
+  __ Ldrb(temp, MemOperand(card, temp.X()));
+  static_assert(gc::accounting::CardTable::kCardClean == 0);
+  __ Cbnz(temp, &done);
+  __ Cbz(mr, &done);
+  __ Unreachable();
+  __ Bind(&done);
 }
 
 void CodeGeneratorARM64::SetupBlockedRegisters() const {
@@ -2317,12 +2352,18 @@ void InstructionCodeGeneratorARM64::HandleFieldSet(HInstruction* instruction,
     }
   }
 
-  if (CodeGenerator::StoreNeedsWriteBarrier(field_type, instruction->InputAt(1)) &&
-      write_barrier_kind != WriteBarrierKind::kDontEmit) {
-    codegen_->MarkGCCard(
+  const bool needs_write_barrier =
+      codegen_->StoreNeedsWriteBarrier(field_type, instruction->InputAt(1), write_barrier_kind);
+
+  if (needs_write_barrier) {
+    DCHECK_IMPLIES(Register(value).IsZero(),
+                   write_barrier_kind == WriteBarrierKind::kEmitBeingReliedOn);
+    codegen_->MaybeMarkGCCard(
         obj,
         Register(value),
-        value_can_be_null && write_barrier_kind == WriteBarrierKind::kEmitWithNullCheck);
+        value_can_be_null && write_barrier_kind == WriteBarrierKind::kEmitNotBeingReliedOn);
+  } else if (codegen_->ShouldCheckGCCard(field_type, instruction->InputAt(1), write_barrier_kind)) {
+    codegen_->CheckGCCardIsValid(obj);
   }
 }
 
@@ -2876,8 +2917,9 @@ void InstructionCodeGeneratorARM64::VisitArraySet(HArraySet* instruction) {
   DataType::Type value_type = instruction->GetComponentType();
   LocationSummary* locations = instruction->GetLocations();
   bool needs_type_check = instruction->NeedsTypeCheck();
+  const WriteBarrierKind write_barrier_kind = instruction->GetWriteBarrierKind();
   bool needs_write_barrier =
-      CodeGenerator::StoreNeedsWriteBarrier(value_type, instruction->GetValue());
+      codegen_->StoreNeedsWriteBarrier(value_type, instruction->GetValue(), write_barrier_kind);
 
   Register array = InputRegisterAt(instruction, 0);
   CPURegister value = InputCPURegisterOrZeroRegAt(instruction, 2);
@@ -2888,13 +2930,17 @@ void InstructionCodeGeneratorARM64::VisitArraySet(HArraySet* instruction) {
   MacroAssembler* masm = GetVIXLAssembler();
 
   if (!needs_write_barrier) {
+    if (codegen_->ShouldCheckGCCard(value_type, instruction->GetValue(), write_barrier_kind)) {
+      codegen_->CheckGCCardIsValid(array);
+    }
+
     DCHECK(!needs_type_check);
+    UseScratchRegisterScope temps(masm);
     if (index.IsConstant()) {
       offset += Int64FromLocation(index) << DataType::SizeShift(value_type);
       destination = HeapOperand(array, offset);
     } else {
-      UseScratchRegisterScope temps(masm);
-      Register temp = temps.AcquireSameSizeAs(array);
+      Register temp_dest = temps.AcquireSameSizeAs(array);
       if (instruction->GetArray()->IsIntermediateAddress()) {
         // We do not need to compute the intermediate address from the array: the
         // input instruction has done it already. See the comment in
@@ -2903,101 +2949,115 @@ void InstructionCodeGeneratorARM64::VisitArraySet(HArraySet* instruction) {
           HIntermediateAddress* interm_addr = instruction->GetArray()->AsIntermediateAddress();
           DCHECK(interm_addr->GetOffset()->AsIntConstant()->GetValueAsUint64() == offset);
         }
-        temp = array;
+        temp_dest = array;
       } else {
-        __ Add(temp, array, offset);
+        __ Add(temp_dest, array, offset);
       }
-      destination = HeapOperand(temp,
+      destination = HeapOperand(temp_dest,
                                 XRegisterFrom(index),
                                 LSL,
                                 DataType::SizeShift(value_type));
     }
+
+    if (kPoisonHeapReferences && value_type == DataType::Type::kReference) {
+      DCHECK(value.IsW());
+      Register temp_src = temps.AcquireW();
+      __ Mov(temp_src, value.W());
+      GetAssembler()->PoisonHeapReference(temp_src.W());
+      source = temp_src;
+    }
+
     {
       // Ensure that between store and MaybeRecordImplicitNullCheck there are no pools emitted.
       EmissionCheckScope guard(GetVIXLAssembler(), kMaxMacroInstructionSizeInBytes);
-      codegen_->Store(value_type, value, destination);
+      codegen_->Store(value_type, source, destination);
       codegen_->MaybeRecordImplicitNullCheck(instruction);
     }
   } else {
     DCHECK(!instruction->GetArray()->IsIntermediateAddress());
-
-    bool can_value_be_null = instruction->GetValueCanBeNull();
-    vixl::aarch64::Label do_store;
-    if (can_value_be_null) {
-      __ Cbz(Register(value), &do_store);
-    }
-
+    bool can_value_be_null = true;
     SlowPathCodeARM64* slow_path = nullptr;
-    if (needs_type_check) {
-      slow_path = new (codegen_->GetScopedAllocator()) ArraySetSlowPathARM64(instruction);
-      codegen_->AddSlowPath(slow_path);
-
-      const uint32_t class_offset = mirror::Object::ClassOffset().Int32Value();
-      const uint32_t super_offset = mirror::Class::SuperClassOffset().Int32Value();
-      const uint32_t component_offset = mirror::Class::ComponentTypeOffset().Int32Value();
-
-      UseScratchRegisterScope temps(masm);
-      Register temp = temps.AcquireSameSizeAs(array);
-      Register temp2 = temps.AcquireSameSizeAs(array);
-
-      // Note that when Baker read barriers are enabled, the type
-      // checks are performed without read barriers.  This is fine,
-      // even in the case where a class object is in the from-space
-      // after the flip, as a comparison involving such a type would
-      // not produce a false positive; it may of course produce a
-      // false negative, in which case we would take the ArraySet
-      // slow path.
-
-      // /* HeapReference<Class> */ temp = array->klass_
-      {
-        // Ensure that between load and MaybeRecordImplicitNullCheck there are no pools emitted.
-        EmissionCheckScope guard(GetVIXLAssembler(), kMaxMacroInstructionSizeInBytes);
-        __ Ldr(temp, HeapOperand(array, class_offset));
-        codegen_->MaybeRecordImplicitNullCheck(instruction);
+    if (!Register(value).IsZero()) {
+      can_value_be_null = instruction->GetValueCanBeNull();
+      vixl::aarch64::Label do_store;
+      if (can_value_be_null) {
+        __ Cbz(Register(value), &do_store);
       }
-      GetAssembler()->MaybeUnpoisonHeapReference(temp);
 
-      // /* HeapReference<Class> */ temp = temp->component_type_
-      __ Ldr(temp, HeapOperand(temp, component_offset));
-      // /* HeapReference<Class> */ temp2 = value->klass_
-      __ Ldr(temp2, HeapOperand(Register(value), class_offset));
-      // If heap poisoning is enabled, no need to unpoison `temp`
-      // nor `temp2`, as we are comparing two poisoned references.
-      __ Cmp(temp, temp2);
+      if (needs_type_check) {
+        slow_path = new (codegen_->GetScopedAllocator()) ArraySetSlowPathARM64(instruction);
+        codegen_->AddSlowPath(slow_path);
 
-      if (instruction->StaticTypeOfArrayIsObjectArray()) {
-        vixl::aarch64::Label do_put;
-        __ B(eq, &do_put);
-        // If heap poisoning is enabled, the `temp` reference has
-        // not been unpoisoned yet; unpoison it now.
+        const uint32_t class_offset = mirror::Object::ClassOffset().Int32Value();
+        const uint32_t super_offset = mirror::Class::SuperClassOffset().Int32Value();
+        const uint32_t component_offset = mirror::Class::ComponentTypeOffset().Int32Value();
+
+        UseScratchRegisterScope temps(masm);
+        Register temp = temps.AcquireSameSizeAs(array);
+        Register temp2 = temps.AcquireSameSizeAs(array);
+
+        // Note that when Baker read barriers are enabled, the type
+        // checks are performed without read barriers.  This is fine,
+        // even in the case where a class object is in the from-space
+        // after the flip, as a comparison involving such a type would
+        // not produce a false positive; it may of course produce a
+        // false negative, in which case we would take the ArraySet
+        // slow path.
+
+        // /* HeapReference<Class> */ temp = array->klass_
+        {
+          // Ensure that between load and MaybeRecordImplicitNullCheck there are no pools emitted.
+          EmissionCheckScope guard(GetVIXLAssembler(), kMaxMacroInstructionSizeInBytes);
+          __ Ldr(temp, HeapOperand(array, class_offset));
+          codegen_->MaybeRecordImplicitNullCheck(instruction);
+        }
         GetAssembler()->MaybeUnpoisonHeapReference(temp);
 
-        // /* HeapReference<Class> */ temp = temp->super_class_
-        __ Ldr(temp, HeapOperand(temp, super_offset));
-        // If heap poisoning is enabled, no need to unpoison
-        // `temp`, as we are comparing against null below.
-        __ Cbnz(temp, slow_path->GetEntryLabel());
-        __ Bind(&do_put);
-      } else {
-        __ B(ne, slow_path->GetEntryLabel());
+        // /* HeapReference<Class> */ temp = temp->component_type_
+        __ Ldr(temp, HeapOperand(temp, component_offset));
+        // /* HeapReference<Class> */ temp2 = value->klass_
+        __ Ldr(temp2, HeapOperand(Register(value), class_offset));
+        // If heap poisoning is enabled, no need to unpoison `temp`
+        // nor `temp2`, as we are comparing two poisoned references.
+        __ Cmp(temp, temp2);
+
+        if (instruction->StaticTypeOfArrayIsObjectArray()) {
+          vixl::aarch64::Label do_put;
+          __ B(eq, &do_put);
+          // If heap poisoning is enabled, the `temp` reference has
+          // not been unpoisoned yet; unpoison it now.
+          GetAssembler()->MaybeUnpoisonHeapReference(temp);
+
+          // /* HeapReference<Class> */ temp = temp->super_class_
+          __ Ldr(temp, HeapOperand(temp, super_offset));
+          // If heap poisoning is enabled, no need to unpoison
+          // `temp`, as we are comparing against null below.
+          __ Cbnz(temp, slow_path->GetEntryLabel());
+          __ Bind(&do_put);
+        } else {
+          __ B(ne, slow_path->GetEntryLabel());
+        }
+      }
+
+      if (can_value_be_null) {
+        DCHECK(do_store.IsLinked());
+        __ Bind(&do_store);
       }
     }
 
-    if (instruction->GetWriteBarrierKind() != WriteBarrierKind::kDontEmit) {
-      DCHECK_EQ(instruction->GetWriteBarrierKind(), WriteBarrierKind::kEmitNoNullCheck)
-          << " Already null checked so we shouldn't do it again.";
-      codegen_->MarkGCCard(array, value.W(), /* emit_null_check= */ false);
-    }
-
-    if (can_value_be_null) {
-      DCHECK(do_store.IsLinked());
-      __ Bind(&do_store);
-    }
+    DCHECK_NE(write_barrier_kind, WriteBarrierKind::kDontEmit);
+    // TODO(solanes): The WriteBarrierKind::kEmitNotBeingReliedOn case should be able to skip this
+    // write barrier when its value is null (without an extra cbz since we already checked if the
+    // value is null for the type check). This will be done as a follow-up since it is a runtime
+    // optimization that needs extra care.
+    DCHECK_IMPLIES(Register(value).IsZero(),
+                   write_barrier_kind == WriteBarrierKind::kEmitBeingReliedOn);
+    codegen_->MarkGCCard(array);
 
     UseScratchRegisterScope temps(masm);
     if (kPoisonHeapReferences) {
-      Register temp_source = temps.AcquireSameSizeAs(array);
-        DCHECK(value.IsW());
+      DCHECK(value.IsW());
+      Register temp_source = temps.AcquireW();
       __ Mov(temp_source, value.W());
       GetAssembler()->PoisonHeapReference(temp_source);
       source = temp_source;
@@ -3691,7 +3751,7 @@ void InstructionCodeGeneratorARM64::HandleGoto(HInstruction* got, HBasicBlock* s
   HLoopInformation* info = block->GetLoopInformation();
 
   if (info != nullptr && info->IsBackEdge(*block) && info->HasSuspendCheck()) {
-    codegen_->MaybeIncrementHotness(/* is_frame_entry= */ false);
+    codegen_->MaybeIncrementHotness(info->GetSuspendCheck(), /* is_frame_entry= */ false);
     GenerateSuspendCheck(info->GetSuspendCheck(), successor);
     return;  // `GenerateSuspendCheck()` emitted the jump.
   }
@@ -4593,24 +4653,27 @@ void LocationsBuilderARM64::VisitInvokeInterface(HInvokeInterface* invoke) {
 void CodeGeneratorARM64::MaybeGenerateInlineCacheCheck(HInstruction* instruction,
                                                        Register klass) {
   DCHECK_EQ(klass.GetCode(), 0u);
-  // We know the destination of an intrinsic, so no need to record inline
-  // caches.
-  if (!instruction->GetLocations()->Intrinsified() &&
-      GetGraph()->IsCompilingBaseline() &&
-      !Runtime::Current()->IsAotCompiler()) {
-    DCHECK(!instruction->GetEnvironment()->IsFromInlinedInvoke());
+  if (ProfilingInfoBuilder::IsInlineCacheUseful(instruction->AsInvoke(), this)) {
     ProfilingInfo* info = GetGraph()->GetProfilingInfo();
     DCHECK(info != nullptr);
-    InlineCache* cache = info->GetInlineCache(instruction->GetDexPc());
-    uint64_t address = reinterpret_cast64<uint64_t>(cache);
-    vixl::aarch64::Label done;
-    __ Mov(x8, address);
-    __ Ldr(w9, MemOperand(x8, InlineCache::ClassesOffset().Int32Value()));
-    // Fast path for a monomorphic cache.
-    __ Cmp(klass.W(), w9);
-    __ B(eq, &done);
-    InvokeRuntime(kQuickUpdateInlineCache, instruction, instruction->GetDexPc());
-    __ Bind(&done);
+    InlineCache* cache = ProfilingInfoBuilder::GetInlineCache(
+        info, GetCompilerOptions(), instruction->AsInvoke());
+    if (cache != nullptr) {
+      uint64_t address = reinterpret_cast64<uint64_t>(cache);
+      vixl::aarch64::Label done;
+      __ Mov(x8, address);
+      __ Ldr(w9, MemOperand(x8, InlineCache::ClassesOffset().Int32Value()));
+      // Fast path for a monomorphic cache.
+      __ Cmp(klass.W(), w9);
+      __ B(eq, &done);
+      InvokeRuntime(kQuickUpdateInlineCache, instruction, instruction->GetDexPc());
+      __ Bind(&done);
+    } else {
+      // This is unexpected, but we don't guarantee stable compilation across
+      // JIT runs so just warn about it.
+      ScopedObjectAccess soa(Thread::Current());
+      LOG(WARNING) << "Missing inline cache for " << GetGraph()->GetArtMethod()->PrettyMethod();
+    }
   }
 }
 

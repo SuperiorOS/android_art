@@ -21,6 +21,7 @@
 #include "subtype_check_info.h"
 
 #include "base/locks.h"
+#include "base/macros.h"
 #include "mirror/class.h"
 #include "runtime.h"
 
@@ -219,7 +220,7 @@ constexpr bool kBitstringSubtypeCheckEnabled = false;
  * All node targets (in `src <: target`) get Assigned, and any parent of an Initialized
  * node also gets Assigned.
  */
-namespace art {
+namespace art HIDDEN {
 
 struct MockSubtypeCheck;  // Forward declaration for testing.
 

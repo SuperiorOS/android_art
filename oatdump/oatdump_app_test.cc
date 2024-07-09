@@ -20,7 +20,6 @@ namespace art {
 
 // Oat file compiled with a boot image. oatdump invoked with a boot image.
 TEST_P(OatDumpTest, TestDumpOatWithRuntimeWithBootImage) {
-  TEST_DISABLED_FOR_RISCV64();
   ASSERT_TRUE(GenerateAppOdexFile(GetParam()));
   ASSERT_TRUE(Exec(GetParam(),
                    kArgOatApp | kArgBootImage | kArgBcp | kArgIsa,
@@ -30,7 +29,6 @@ TEST_P(OatDumpTest, TestDumpOatWithRuntimeWithBootImage) {
 
 // Oat file compiled without a boot image. oatdump invoked without a boot image.
 TEST_P(OatDumpTest, TestDumpOatWithRuntimeWithNoBootImage) {
-  TEST_DISABLED_FOR_RISCV64();
   TEST_DISABLED_FOR_DEBUG_BUILD();  // DCHECK failed.
   ASSERT_TRUE(GenerateAppOdexFile(GetParam(), {"--boot-image=/nonx/boot.art"}));
   ASSERT_TRUE(Exec(GetParam(),
@@ -41,7 +39,6 @@ TEST_P(OatDumpTest, TestDumpOatWithRuntimeWithNoBootImage) {
 
 // Dex code cannot be found in the vdex file, and no --dex-file is specified. Dump header only.
 TEST_P(OatDumpTest, TestDumpOatTryWithRuntimeDexNotFound) {
-  TEST_DISABLED_FOR_RISCV64();
   ASSERT_TRUE(
       GenerateAppOdexFile(GetParam(), {"--dex-location=/nonx/app.jar", "--copy-dex-files=false"}));
   ASSERT_TRUE(Exec(GetParam(), kArgOatApp | kArgBootImage | kArgBcp | kArgIsa, {}, kExpectOat));
@@ -49,7 +46,6 @@ TEST_P(OatDumpTest, TestDumpOatTryWithRuntimeDexNotFound) {
 
 // Dex code cannot be found in the vdex file, but can be found in the specified dex file.
 TEST_P(OatDumpTest, TestDumpOatWithRuntimeDexSpecified) {
-  TEST_DISABLED_FOR_RISCV64();
   ASSERT_TRUE(
       GenerateAppOdexFile(GetParam(), {"--dex-location=/nonx/app.jar", "--copy-dex-files=false"}));
   ASSERT_TRUE(Exec(GetParam(),
@@ -60,7 +56,6 @@ TEST_P(OatDumpTest, TestDumpOatWithRuntimeDexSpecified) {
 
 // Oat file compiled with a boot image. oatdump invoked without a boot image.
 TEST_P(OatDumpTest, TestDumpOatWithoutRuntimeBcpMismatch) {
-  TEST_DISABLED_FOR_RISCV64();
   ASSERT_TRUE(GenerateAppOdexFile(GetParam()));
   ASSERT_TRUE(Exec(GetParam(),
                    kArgOatApp | kArgBcp | kArgIsa,
@@ -70,14 +65,12 @@ TEST_P(OatDumpTest, TestDumpOatWithoutRuntimeBcpMismatch) {
 
 // Bootclasspath not specified.
 TEST_P(OatDumpTest, TestDumpOatWithoutRuntimeNoBcp) {
-  TEST_DISABLED_FOR_RISCV64();
   ASSERT_TRUE(GenerateAppOdexFile(GetParam()));
   ASSERT_TRUE(Exec(GetParam(), kArgOatApp, {}, kExpectOat | kExpectCode | kExpectBssOffsetsForBcp));
 }
 
 // Dex code cannot be found in the vdex file, and no --dex-file is specified. Dump header only.
 TEST_P(OatDumpTest, TestDumpOatWithoutRuntimeDexNotFound) {
-  TEST_DISABLED_FOR_RISCV64();
   ASSERT_TRUE(
       GenerateAppOdexFile(GetParam(), {"--dex-location=/nonx/app.jar", "--copy-dex-files=false"}));
   ASSERT_TRUE(Exec(GetParam(), kArgOatApp, {}, kExpectOat));
@@ -85,7 +78,6 @@ TEST_P(OatDumpTest, TestDumpOatWithoutRuntimeDexNotFound) {
 
 // Dex code cannot be found in the vdex file, but can be found in the specified dex file.
 TEST_P(OatDumpTest, TestDumpOatWithoutRuntimeDexSpecified) {
-  TEST_DISABLED_FOR_RISCV64();
   ASSERT_TRUE(
       GenerateAppOdexFile(GetParam(), {"--dex-location=/nonx/app.jar", "--copy-dex-files=false"}));
   ASSERT_TRUE(Exec(
@@ -93,7 +85,6 @@ TEST_P(OatDumpTest, TestDumpOatWithoutRuntimeDexSpecified) {
 }
 
 TEST_P(OatDumpTest, TestDumpAppImageWithBootImage) {
-  TEST_DISABLED_FOR_RISCV64();
   TEST_DISABLED_WITHOUT_BAKER_READ_BARRIERS();  // GC bug, b/126305867
   const std::string app_image_arg = "--app-image-file=" + GetAppImageName();
   ASSERT_TRUE(GenerateAppOdexFile(GetParam(), {app_image_arg}));
@@ -105,7 +96,6 @@ TEST_P(OatDumpTest, TestDumpAppImageWithBootImage) {
 
 // Deprecated usage, but checked for compatibility.
 TEST_P(OatDumpTest, TestDumpAppImageWithBootImageLegacy) {
-  TEST_DISABLED_FOR_RISCV64();
   TEST_DISABLED_WITHOUT_BAKER_READ_BARRIERS();  // GC bug, b/126305867
   const std::string app_image_arg = "--app-image-file=" + GetAppImageName();
   ASSERT_TRUE(GenerateAppOdexFile(GetParam(), {app_image_arg}));
@@ -116,7 +106,6 @@ TEST_P(OatDumpTest, TestDumpAppImageWithBootImageLegacy) {
 }
 
 TEST_P(OatDumpTest, TestDumpAppImageInvalidPath) {
-  TEST_DISABLED_FOR_RISCV64();
   TEST_DISABLED_WITHOUT_BAKER_READ_BARRIERS();  // GC bug, b/126305867
   const std::string app_image_arg = "--app-image-file=" + GetAppImageName();
   ASSERT_TRUE(GenerateAppOdexFile(GetParam(), {app_image_arg}));
@@ -129,7 +118,6 @@ TEST_P(OatDumpTest, TestDumpAppImageInvalidPath) {
 
 // The runtime can start, but the boot image check should fail.
 TEST_P(OatDumpTest, TestDumpAppImageWithWrongBootImage) {
-  TEST_DISABLED_FOR_RISCV64();
   TEST_DISABLED_WITHOUT_BAKER_READ_BARRIERS();  // GC bug, b/126305867
   const std::string app_image_arg = "--app-image-file=" + GetAppImageName();
   ASSERT_TRUE(GenerateAppOdexFile(GetParam(), {app_image_arg}));
@@ -142,7 +130,6 @@ TEST_P(OatDumpTest, TestDumpAppImageWithWrongBootImage) {
 
 // Not possible.
 TEST_P(OatDumpTest, TestDumpAppImageWithoutRuntime) {
-  TEST_DISABLED_FOR_RISCV64();
   TEST_DISABLED_WITHOUT_BAKER_READ_BARRIERS();  // GC bug, b/126305867
   const std::string app_image_arg = "--app-image-file=" + GetAppImageName();
   ASSERT_TRUE(GenerateAppOdexFile(GetParam(), {app_image_arg}));
@@ -155,7 +142,6 @@ TEST_P(OatDumpTest, TestDumpAppImageWithoutRuntime) {
 
 // Dex code cannot be found in the vdex file, and no --dex-file is specified. Cannot dump app image.
 TEST_P(OatDumpTest, TestDumpAppImageDexNotFound) {
-  TEST_DISABLED_FOR_RISCV64();
   TEST_DISABLED_WITHOUT_BAKER_READ_BARRIERS();  // GC bug, b/126305867
   const std::string app_image_arg = "--app-image-file=" + GetAppImageName();
   ASSERT_TRUE(GenerateAppOdexFile(
@@ -169,7 +155,6 @@ TEST_P(OatDumpTest, TestDumpAppImageDexNotFound) {
 
 // Dex code cannot be found in the vdex file, but can be found in the specified dex file.
 TEST_P(OatDumpTest, TestDumpAppImageDexSpecified) {
-  TEST_DISABLED_FOR_RISCV64();
   TEST_DISABLED_WITHOUT_BAKER_READ_BARRIERS();  // GC bug, b/126305867
   const std::string app_image_arg = "--app-image-file=" + GetAppImageName();
   ASSERT_TRUE(GenerateAppOdexFile(

@@ -248,7 +248,7 @@ class ValueSet : public ArenaObject<kArenaAllocGvn> {
   // Iterates over buckets with impure instructions (even indices) and deletes
   // the ones on which 'cond' returns true.
   template<typename Functor>
-  void DeleteAllImpureWhich(Functor cond) {
+  void DeleteAllImpureWhich(Functor&& cond) {
     for (size_t i = 0; i < num_buckets_; i += 2) {
       Node* node = buckets_[i];
       Node* previous = nullptr;

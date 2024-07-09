@@ -26,7 +26,7 @@
 #include "runtime.h"
 #include "well_known_classes.h"
 
-namespace art {
+namespace art HIDDEN {
 
 class StringBuilderAppend::Builder {
  public:

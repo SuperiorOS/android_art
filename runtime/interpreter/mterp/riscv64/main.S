@@ -150,7 +150,7 @@ END \name
 .endm
 
 .macro DO_SUSPEND_CHECK continue
-    lw t0, THREAD_FLAGS_OFFSET(xSELF)
+    lwu t0, THREAD_FLAGS_OFFSET(xSELF)
     andi t0, t0, THREAD_SUSPEND_OR_CHECKPOINT_REQUEST
     beqz t0, \continue
     EXPORT_PC
@@ -253,15 +253,39 @@ END \name
 //   - xSELF
 // Clobbers: t0
 .macro CHECK_AND_UPDATE_SHARED_MEMORY_METHOD if_hot, if_not_hot
-    lw t0, ART_METHOD_ACCESS_FLAGS_OFFSET(a0)
+    lwu t0, ART_METHOD_ACCESS_FLAGS_OFFSET(a0)
     BRANCH_IF_BIT_CLEAR t0, t0, ART_METHOD_IS_MEMORY_SHARED_FLAG_BIT, \if_hot
 
-    lw t0, THREAD_SHARED_METHOD_HOTNESS_OFFSET(xSELF)
+    lwu t0, THREAD_SHARED_METHOD_HOTNESS_OFFSET(xSELF)  // t0 := hotness
     beqz t0, \if_hot
 
-    addi t0, t0, -1  // Reduce hotness
+    addi t0, t0, -1  // increase hotness
     sw t0,  THREAD_SHARED_METHOD_HOTNESS_OFFSET(xSELF)
     j \if_not_hot
+.endm
+
+// Update xPC by \units code units. On back edges, perform hotness and suspend.
+.macro BRANCH units
+    sh1add xPC, \units, xPC
+    blez \units, 2f  // If branch is <= 0, increase hotness and do a suspend check.
+1:
+    FETCH_INST
+    GET_INST_OPCODE t0
+    GOTO_OPCODE t0
+2:
+    ld a0, (sp)
+    lhu t0, ART_METHOD_HOTNESS_COUNT_OFFSET(a0)  // t0 := hotness
+#if (NTERP_HOTNESS_VALUE != 0)
+#error Expected 0 for hotness value
+#endif
+    // If the counter is at zero (hot), handle it in the runtime.
+    beqz t0, 3f
+    addi t0, t0, -1  // increase hotness
+    sh t0, ART_METHOD_HOTNESS_COUNT_OFFSET(a0)
+    DO_SUSPEND_CHECK continue=1b
+    j 1b
+3:
+    tail NterpHandleHotnessOverflow  // arg a0 (ArtMethod*)
 .endm
 
 // Increase method hotness before starting the method.
@@ -270,13 +294,13 @@ END \name
 // Clobbers: t0
 .macro START_EXECUTING_INSTRUCTIONS
     ld a0, (sp)
-    lhu t0, ART_METHOD_HOTNESS_COUNT_OFFSET(a0)
+    lhu t0, ART_METHOD_HOTNESS_COUNT_OFFSET(a0)  // t0 := hotness
 #if (NTERP_HOTNESS_VALUE != 0)
 #error Expected 0 for hotness value
 #endif
     // If the counter is at zero (hot), handle it in the runtime.
     beqz t0, 3f
-    addi t0, t0, -1
+    addi t0, t0, -1  // increase hotness
     sh t0, ART_METHOD_HOTNESS_COUNT_OFFSET(a0)
 1:
     DO_SUSPEND_CHECK continue=2f
@@ -291,33 +315,6 @@ END \name
     mv a2, zero  // vergs=nullptr
     call nterp_hot_method
     j 2b
-.endm
-
-// Typed read, defaults to 32-bit read
-// Note: Incorrect for an object ref; it requires LWU, or LW;ZEXT.W.
-// Clobbers: \reg
-// Safe if \reg == \vreg.
-.macro GET_VREG reg, vreg, is_wide=0
-    .if \is_wide
-      GET_VREG_WIDE \reg, \vreg
-    .else
-      sh2add \reg, \vreg, xFP  // vreg addr in register array
-      lw \reg, (\reg)          // reg := fp[vreg]
-    .endif
-.endm
-
-// Typed write, defaults to 32-bit write.
-// Note: Incorrect for an object ref; it requires 2nd SW into xREFS.
-// Clobbers: z0
-.macro SET_VREG reg, vreg, z0, is_wide=0
-    .if \is_wide
-      SET_VREG_WIDE \reg, \vreg, \z0
-    .else
-      sh2add \z0, \vreg, xFP    // vreg addr in register array
-      sw \reg, (\z0)            // fp[vreg] := reg
-      sh2add \z0, \vreg, xREFS  // vreg addr in reference array
-      sw zero, (\z0)            // refs[vreg] := null
-    .endif
 .endm
 
 // 64 bit read
@@ -354,30 +351,6 @@ END \name
     sw \reg, (\z0)            // refs[vreg] := reg
 .endm
 
-// Floating-point read, defaults to 32-bit read.
-// Clobbers: \reg, \vreg
-.macro GET_VREG_FLOAT reg, vreg, is_double=0
-    .if \is_double
-      GET_VREG_DOUBLE \reg, \vreg
-    .else
-      sh2add \vreg, \vreg, xFP  // vreg addr in register array
-      flw \reg, (\vreg)         // reg := fp[vreg]
-    .endif
-.endm
-
-// Floating-point write, defaults to 32-bit write.
-// Clobbers: \reg, z0
-.macro SET_VREG_FLOAT reg, vreg, z0, is_double=0
-    .if \is_double
-      SET_VREG_DOUBLE \reg, \vreg, \z0
-    .else
-      sh2add \z0, \vreg, xFP    // vreg addr in register array
-      fsw \reg, (\z0)           // fp[vreg] := reg
-      sh2add \z0, \vreg, xREFS  // vreg addr in reference array
-      sw zero, (\z0)            // refs[vreg] := null
-    .endif
-.endm
-
 // Floating-point 64 bit read
 // Clobbers: \reg, \vreg
 .macro GET_VREG_DOUBLE reg, vreg
@@ -393,6 +366,58 @@ END \name
     sh2add \z0, \vreg, xREFS  // vreg addr in reference array
     sd zero, (\z0)            // refs[vreg] := null ; refs[vreg+1] := null
 .endm
+
+// Put "%def" definitions after ".macro" definitions for proper expansion. %def is greedy.
+
+// Typed read, defaults to 32-bit read
+// Note: An object ref requires LWU, or LW;ZEXT.W.
+// Clobbers: \reg
+// Safe if \reg == \vreg.
+%def get_vreg(reg, vreg, width=32, is_wide=False, is_unsigned=False):
+%  if is_wide or width == 64:
+     GET_VREG_WIDE $reg, $vreg
+%  elif is_unsigned:
+     sh2add $reg, $vreg, xFP  // vreg addr in register array
+     lwu $reg, ($reg)         // reg := fp[vreg], zext
+%  else:
+     sh2add $reg, $vreg, xFP  // vreg addr in register array
+     lw $reg, ($reg)          // reg := fp[vreg]
+%#:
+
+// Typed write, defaults to 32-bit write.
+// Note: Incorrect for an object ref; it requires 2nd SW into xREFS.
+// Clobbers: z0
+%def set_vreg(reg, vreg, z0, width=32, is_wide=False):
+%  if is_wide or width == 64:
+     SET_VREG_WIDE $reg, $vreg, $z0
+%  else:
+     sh2add $z0, $vreg, xFP    // vreg addr in register array
+     sw $reg, ($z0)            // fp[vreg] := reg
+     sh2add $z0, $vreg, xREFS  // vreg addr in reference array
+     sw zero, ($z0)            // refs[vreg] := null
+%#:
+
+// Floating-point read, defaults to 32-bit read.
+// Clobbers: reg, vreg
+%def get_vreg_float(reg, vreg, is_double=False):
+%  if is_double:
+     GET_VREG_DOUBLE $reg, $vreg
+%  else:
+     sh2add $vreg, $vreg, xFP  // vreg addr in register array
+     flw $reg, ($vreg)         // reg := fp[vreg]
+%#:
+
+// Floating-point write, defaults to 32-bit write.
+// Clobbers: reg, z0
+%def set_vreg_float(reg, vreg, z0, is_double=False):
+%  if is_double:
+     SET_VREG_DOUBLE $reg, $vreg, $z0
+%  else:
+     sh2add $z0, $vreg, xFP    // vreg addr in register array
+     fsw $reg, ($z0)           // fp[vreg] := reg
+     sh2add $z0, $vreg, xREFS  // vreg addr in reference array
+     sw zero, ($z0)            // refs[vreg] := null
+%#:
 
 %def entry():
 /*
@@ -550,6 +575,11 @@ OAT_ENTRY ExecuteNterpImpl
 // Enclose all code below in a symbol (which gets printed in backtraces).
 NAME_START nterp_helper
 
+common_errArrayIndex:
+    EXPORT_PC
+    // CALL preserves RA for stack walking.
+    call art_quick_throw_array_bounds  // args a0 (index), a1 (length)
+
 common_errDivideByZero:
     EXPORT_PC
     // CALL preserves RA for stack walking.
@@ -593,6 +623,48 @@ NterpInvokePolymorphicRange:
 NterpInvokeCustomRange:
 %  nterp_invoke_custom_range()
 
+// Arg a0: ArtMethod*
+NterpHandleHotnessOverflow:
+   CHECK_AND_UPDATE_SHARED_MEMORY_METHOD if_hot=.Lhotspill_hot, if_not_hot=.Lhotspill_suspend
+.Lhotspill_hot:
+   mv a1, xPC
+   mv a2, xFP
+   call nterp_hot_method  // args a0, a1, a2
+   bnez a0, .Lhotspill_osr
+.Lhotspill_advance:
+   FETCH_INST
+   GET_INST_OPCODE t0
+   GOTO_OPCODE t0
+.Lhotspill_osr:
+   // a0 = OsrData*
+   // Drop most of the current nterp frame, but keep the callee-saves.
+   // The nterp callee-saves (count and layout) match the OSR frame's callee-saves.
+   ld sp, -8(xREFS)  // caller's interpreted frame pointer
+   .cfi_def_cfa sp, NTERP_SIZE_SAVE_CALLEE_SAVES
+   lwu t0, OSR_DATA_FRAME_SIZE(a0)
+   addi t0, t0, -NTERP_SIZE_SAVE_CALLEE_SAVES  // t0 := osr frame - callee saves, in bytes
+   mv s7, sp         // Remember CFA in a callee-save register.
+   .cfi_def_cfa_register s7
+   sub sp, sp, t0    // OSR size guaranteed to be stack aligned (16 bytes).
+
+   addi t1, a0, OSR_DATA_MEMORY  // t1 := read start
+   add t1, t1, t0                // t1 := read end (exclusive)
+   mv t2, s7                     // t2 := write end (exclusive)
+   // t0 >= 8 (OSR places ArtMethod* at bottom of frame), so loop will terminate.
+.Lhotspill_osr_copy_loop:
+   addi t1, t1, -8
+   ld t3, (t1)
+   addi t2, t2, -8
+   sd t3, (t2)
+   bne t2, sp, .Lhotspill_osr_copy_loop
+
+   ld s8, OSR_DATA_NATIVE_PC(a0)  // s8 := native PC; jump after free
+   call free  // arg a0; release OsrData*
+   jr s8      // Jump to the compiled code.
+.Lhotspill_suspend:
+   DO_SUSPEND_CHECK continue=.Lhotspill_advance
+   j .Lhotspill_advance
+
 // This is the logical end of ExecuteNterpImpl, where the frame info applies.
 .cfi_endproc
 
@@ -620,10 +692,15 @@ NAME_END nterp_helper
 EndExecuteNterpImpl:
 
 // Entrypoints into runtime.
+NTERP_TRAMPOLINE nterp_allocate_object, NterpAllocateObject
+NTERP_TRAMPOLINE nterp_filled_new_array, NterpFilledNewArray
+NTERP_TRAMPOLINE nterp_filled_new_array_range, NterpFilledNewArrayRange
 NTERP_TRAMPOLINE nterp_get_class, NterpGetClass
+NTERP_TRAMPOLINE nterp_get_instance_field_offset, NterpGetInstanceFieldOffset
 NTERP_TRAMPOLINE nterp_get_method, NterpGetMethod
 NTERP_TRAMPOLINE nterp_get_static_field, NterpGetStaticField
 NTERP_TRAMPOLINE nterp_hot_method, NterpHotMethod
+NTERP_TRAMPOLINE nterp_load_object, NterpLoadObject
 
 ENTRY nterp_deliver_pending_exception
     DELIVER_PENDING_EXCEPTION
@@ -643,7 +720,11 @@ artNterpAsmInstructionStart = .L_op_nop
     .hidden artNterpAsmInstructionEnd
     .global artNterpAsmInstructionEnd
 artNterpAsmInstructionEnd:
-    unimp
+    // artNterpAsmInstructionEnd is used as landing pad for exception handling.
+    // xPC (S3) for the exception handler was set just prior to the long jump coming here.
+    FETCH_INST
+    GET_INST_OPCODE t0
+    GOTO_OPCODE t0
 
 %def opcode_pre():
 %   pass

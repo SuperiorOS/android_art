@@ -216,14 +216,15 @@ known_failing_tests = frozenset([
   "2243-single-step-default",
   "2262-miranda-methods",
   "2262-default-conflict-methods",
-  # 2247-checker-write-barrier-elimination: Disabled while we investigate failures
-  "2247-checker-write-barrier-elimination"
 ])
 
-# These tests are new and have not had enough post-submit runs to meet
-# pre-submit SLOs. Monitor their post-submit runs before removing them
-# from this set (in order to promote them to presubmits).
+# These ART run-tests are new and have not had enough post-submit runs
+# to meet pre-submit SLOs. Monitor their post-submit runs before
+# removing them from this set (in order to promote them to
+# presubmits).
 postsubmit_only_tests = frozenset([
+  "2247-checker-write-barrier-elimination",
+  "2273-checker-unreachable-intrinsics",
 ])
 
 known_failing_on_hwasan_tests = frozenset([
@@ -239,6 +240,7 @@ art_gtest_user_module_names = [
     "art_standalone_dex2oat_tests",
     "art_standalone_dexdump_tests",
     "art_standalone_dexlist_tests",
+    "art_standalone_dexopt_chroot_setup_tests",
     "art_standalone_libartbase_tests",
     "art_standalone_libartpalette_tests",
     "art_standalone_libartservice_tests",
@@ -263,11 +265,33 @@ art_gtest_eng_only_module_names = [
 # All supported ART gtests.
 art_gtest_module_names = sorted(art_gtest_user_module_names + art_gtest_eng_only_module_names)
 
+# These ART gtests are new and have not had enough post-submit runs
+# to meet pre-submit SLOs. Monitor their post-submit runs before
+# removing them from this set (in order to promote them to
+# presubmits).
+art_gtest_postsubmit_only_module_names = [
+  "art_standalone_dexopt_chroot_setup_tests",
+]
+
 # ART gtests supported in MTS that do not need root access to the device.
 art_gtest_mts_user_module_names = copy.copy(art_gtest_user_module_names)
 
+# ART gtests supported in presubmits.
+art_gtest_presubmit_module_names = [t for t in art_gtest_module_names
+                                    if t not in art_gtest_postsubmit_only_module_names]
+
 # ART gtests supported in Mainline presubmits.
-art_gtests_mainline_presubmit_module_names = copy.copy(art_gtest_module_names)
+art_gtest_mainline_presubmit_module_names = copy.copy(art_gtest_presubmit_module_names)
+
+# ART gtests supported in postsubmits.
+unknown_art_gtest_postsubmit_only_module_names = [t for t in art_gtest_postsubmit_only_module_names
+                                                  if t not in art_gtest_module_names]
+if unknown_art_gtest_postsubmit_only_module_names:
+  logging.error(textwrap.dedent("""\
+  The following `art_gtest_postsubmit_only_module_names` elements are not part of
+  `art_gtest_module_names`: """) + str(unknown_art_gtest_postsubmit_only_module_names))
+  sys.exit(1)
+art_gtest_postsubmit_module_names = copy.copy(art_gtest_postsubmit_only_module_names)
 
 # Tests exhibiting a flaky behavior, currently exluded from MTS for
 # the stake of stability / confidence (b/209958457).
@@ -303,9 +327,23 @@ flaky_tests_excluded_from_mts = {
     ]
 }
 
+# Tests excluded from all test mapping test groups.
+#
+# Example of admissible values in this dictionary:
+#
+#   "art_standalone_cmdline_tests": ["CmdlineParserTest#TestCompilerOption"],
+#   "art_standalone_dexopt_chroot_setup_tests": ["DexoptChrootSetupTest#HelloWorld"],
+#
+failing_tests_excluded_from_test_mapping = {
+  # Empty.
+}
+
 # Tests failing because of linking issues, currently exluded from MTS
 # and Mainline Presubmits to minimize noise in continuous runs while
 # we investigate.
+#
+# Example of admissible values in this dictionary: same as for
+# `failing_tests_excluded_from_test_mapping` (see above).
 #
 # TODO(b/247108425): Address the linking issues and re-enable these
 # tests.
@@ -313,6 +351,11 @@ failing_tests_excluded_from_mts_and_mainline_presubmits = {
     "art_standalone_compiler_tests": ["JniCompilerTest*"],
     "art_standalone_libartpalette_tests": ["PaletteClientJniTest*"],
 }
+
+failing_tests_excluded_from_mainline_presubmits = (
+  failing_tests_excluded_from_test_mapping |
+  failing_tests_excluded_from_mts_and_mainline_presubmits
+)
 
 # Is `run_test` a Checker test (i.e. a test containing Checker
 # assertions)?
@@ -510,21 +553,26 @@ class Generator:
     else:
       test_config_template = "art-run-test-target-no-test-suite-tag-template"
 
-    # Define `test_suites`, if present in the test's metadata.
-    test_suites = ""
-    if metadata.get("test_suites"):
-      test_suites = f"""\
+    # Define the `test_suites` property, if test suites are present in
+    # the test's metadata.
+    test_suites_list = metadata.get("test_suites")
+    test_suites_prop = ""
+    if test_suites_list:
+      test_suites_joined = """,
+              """.join([f"\"{s}\"" for s in test_suites_list])
+      test_suites_prop = f"""\
 
-          test_suites: {json.dumps(metadata.get("test_suites"))},"""
+          test_suites: [
+              {test_suites_joined},
+          ],"""
 
+    include_srcs_prop = ""
     if is_checker_test(run_test):
-      include_src = """\
+      include_srcs_prop = """\
 
           // Include the Java source files in the test's artifacts, to make Checker assertions
           // available to the TradeFed test runner.
           include_srcs: true,"""
-    else:
-      include_src = ""
 
     # The default source directory is `src`, except if `src-art` exists.
     if os.path.isdir(os.path.join(run_test_path, "src-art")):
@@ -565,7 +613,7 @@ class Generator:
           data: [
               ":{run_test_module_name}-expected-stdout",
               ":{run_test_module_name}-expected-stderr",
-          ],{test_suites}{include_src}
+          ],{test_suites_prop}{include_srcs_prop}
       }}
       """))
 
@@ -623,25 +671,34 @@ class Generator:
                                         for t in art_run_tests
                                         if t in postsubmit_only_tests]
 
+    def gen_tests_dict(tests, excluded_test_cases = {}, excluded_test_modules = [], suffix = ""):
+      return [
+          ({"name": t + suffix,
+            "options": [
+                {"exclude-filter": e}
+                for e in excluded_test_cases[t]
+            ]}
+           if t in excluded_test_cases
+           else {"name": t + suffix})
+          for t in tests
+          if t not in excluded_test_modules
+      ]
+
     # Mainline presubmits.
     mainline_presubmit_apex_suffix = "[com.google.android.art.apex]"
     mainline_other_presubmit_tests = []
     mainline_presubmit_tests = (mainline_other_presubmit_tests + presubmit_run_test_module_names +
-                                art_gtests_mainline_presubmit_module_names)
-    mainline_presubmit_tests_dict = [
-        ({"name": t + mainline_presubmit_apex_suffix,
-          "options": [
-              {"exclude-filter": e}
-              for e in failing_tests_excluded_from_mts_and_mainline_presubmits[t]
-          ]}
-         if t in failing_tests_excluded_from_mts_and_mainline_presubmits
-         else {"name": t + mainline_presubmit_apex_suffix})
-        for t in mainline_presubmit_tests
-    ]
+                                art_gtest_mainline_presubmit_module_names)
+    mainline_presubmit_tests_dict = \
+      gen_tests_dict(mainline_presubmit_tests,
+                     failing_tests_excluded_from_mainline_presubmits,
+                     [],
+                     mainline_presubmit_apex_suffix)
 
     # Android Virtualization Framework presubmits
     avf_presubmit_tests = ["ComposHostTestCases"]
-    avf_presubmit_tests_dict = [{"name": t} for t in avf_presubmit_tests]
+    avf_presubmit_tests_dict = gen_tests_dict(avf_presubmit_tests,
+                                              failing_tests_excluded_from_test_mapping)
 
     # Presubmits.
     other_presubmit_tests = [
@@ -652,14 +709,18 @@ class Generator:
         "art_standalone_dexpreopt_tests",
     ]
     presubmit_tests = (other_presubmit_tests + presubmit_run_test_module_names +
-                       art_gtest_module_names)
-    presubmit_tests_dict = [{"name": t} for t in presubmit_tests]
-    hwasan_presubmit_tests_dict = [{"name": t} for t in presubmit_tests
-                                   if t not in known_failing_on_hwasan_tests]
+                       art_gtest_presubmit_module_names)
+    presubmit_tests_dict = gen_tests_dict(presubmit_tests,
+                                          failing_tests_excluded_from_test_mapping)
+    hwasan_presubmit_tests_dict = gen_tests_dict(presubmit_tests,
+                                                 failing_tests_excluded_from_test_mapping,
+                                                 known_failing_on_hwasan_tests)
 
     # Postsubmits.
-    postsubmit_tests = postsubmit_run_test_module_names
+    postsubmit_tests = postsubmit_run_test_module_names + art_gtest_postsubmit_module_names
     postsubmit_tests_dict = [{"name": t} for t in postsubmit_tests]
+    postsubmit_tests_dict = gen_tests_dict(postsubmit_tests,
+                                           failing_tests_excluded_from_test_mapping)
 
     # Use an `OrderedDict` container to preserve the order in which items are inserted.
     # Do not produce an entry for a test group if it is empty.
@@ -975,19 +1036,28 @@ class Generator:
     expected_succeeding_tests_percentage = int(
         num_expected_succeeding_tests * 100 / len(run_tests))
 
-    mainline_presubmit_gtests_percentage = int(
-        len(art_gtests_mainline_presubmit_module_names) * 100 / len(art_gtest_module_names))
+    num_gtests = len(art_gtest_module_names)
+
+    num_presubmit_gtests = len(art_gtest_presubmit_module_names)
+    presubmit_gtests_percentage = int(num_presubmit_gtests * 100 / num_gtests)
+
+    num_mainline_presubmit_gtests = len(art_gtest_mainline_presubmit_module_names)
+    mainline_presubmit_gtests_percentage = int(num_mainline_presubmit_gtests * 100 / num_gtests)
+
+    num_postsubmit_gtests = len(art_gtest_postsubmit_module_names)
+    postsubmit_gtests_percentage = int(num_postsubmit_gtests * 100 / num_gtests)
 
     print(f"Generated TEST_MAPPING entries for {num_expected_succeeding_tests} ART run-tests out"
           f" of {len(run_tests)} ({expected_succeeding_tests_percentage}%):")
     for (num_tests, test_kind, tests_percentage, test_group_name) in [
         (num_mainline_presubmit_run_tests, "ART run-tests", mainline_presubmit_run_tests_percentage,
          "mainline-presubmit"),
-        (len(art_gtests_mainline_presubmit_module_names), "ART gtests",
-         mainline_presubmit_gtests_percentage, "mainline-presubmit"),
         (num_presubmit_run_tests, "ART run-tests", presubmit_run_tests_percentage, "presubmit"),
         (num_postsubmit_run_tests, "ART run-tests", postsubmit_run_tests_percentage, "postsubmit"),
-        (len(art_gtest_module_names), "ART gtests", 100, "presubmit"),
+        (num_mainline_presubmit_gtests, "ART gtests", mainline_presubmit_gtests_percentage,
+         "mainline-presubmit"),
+        (num_presubmit_gtests, "ART gtests", presubmit_gtests_percentage, "presubmit"),
+        (num_postsubmit_gtests, "ART gtests", postsubmit_gtests_percentage, "presubmit"),
     ]:
       print(
           f"  {num_tests:3d} {test_kind} ({tests_percentage}%) in `{test_group_name}` test group.")

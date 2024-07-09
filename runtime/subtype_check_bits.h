@@ -20,8 +20,9 @@
 #include "base/bit_string.h"
 #include "base/bit_struct.h"
 #include "base/bit_utils.h"
+#include "base/macros.h"
 
-namespace art {
+namespace art HIDDEN {
 
 /**
  * The SubtypeCheckBits memory layout (in bits):

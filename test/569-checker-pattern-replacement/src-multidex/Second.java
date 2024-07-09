@@ -14,8 +14,13 @@
  * limitations under the License.
  */
 
+import dalvik.annotation.optimization.NeverInline;
+
 public final class Second {
   public static void staticNop(int unused) { }
+
+  @NeverInline
+  public static void staticNopNeverInline(int unused) { }
 
   public void nop() { }
 

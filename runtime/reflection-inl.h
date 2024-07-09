@@ -28,7 +28,7 @@
 #include "mirror/object-inl.h"
 #include "obj_ptr-inl.h"
 
-namespace art {
+namespace art HIDDEN {
 
 inline bool ConvertPrimitiveValueNoThrow(Primitive::Type srcType,
                                          Primitive::Type dstType,

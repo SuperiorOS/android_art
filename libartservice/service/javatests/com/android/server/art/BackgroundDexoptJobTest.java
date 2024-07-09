@@ -16,6 +16,7 @@
 
 package com.android.server.art;
 
+import static com.android.server.art.BackgroundDexoptJob.JOB_ID;
 import static com.android.server.art.model.Config.Callback;
 import static com.android.server.art.model.DexoptResult.DexoptResultStatus;
 import static com.android.server.art.model.DexoptResult.PackageDexoptResult;
@@ -103,7 +104,7 @@ public class BackgroundDexoptJobTest {
         lenient().when(mInjector.getJobScheduler()).thenReturn(mJobScheduler);
 
         mBackgroundDexoptJob = new BackgroundDexoptJob(mInjector);
-        lenient().when(BackgroundDexoptJobService.getJob()).thenReturn(mBackgroundDexoptJob);
+        lenient().when(BackgroundDexoptJobService.getJob(JOB_ID)).thenReturn(mBackgroundDexoptJob);
 
         lenient()
                 .doAnswer(invocation -> {

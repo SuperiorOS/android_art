@@ -18,10 +18,11 @@
 #define ART_RUNTIME_RUNTIME_INTRINSICS_H_
 
 #include "base/locks.h"
+#include "base/macros.h"
 
-namespace art {
+namespace art HIDDEN {
 
-void InitializeIntrinsics() REQUIRES_SHARED(Locks::mutator_lock_);
+EXPORT void InitializeIntrinsics() REQUIRES_SHARED(Locks::mutator_lock_);
 
 }  // namespace art
 

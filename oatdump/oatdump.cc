@@ -72,23 +72,23 @@
 #include "gc/space/image_space.h"
 #include "gc/space/large_object_space.h"
 #include "gc/space/space-inl.h"
-#include "image-inl.h"
 #include "imtable-inl.h"
-#include "index_bss_mapping.h"
 #include "interpreter/unstarted_runtime.h"
 #include "mirror/array-inl.h"
 #include "mirror/class-inl.h"
 #include "mirror/dex_cache-inl.h"
 #include "mirror/object-inl.h"
 #include "mirror/object_array-inl.h"
-#include "oat.h"
-#include "oat_file-inl.h"
-#include "oat_file_assistant.h"
-#include "oat_file_assistant_context.h"
-#include "oat_file_manager.h"
+#include "oat/image-inl.h"
+#include "oat/index_bss_mapping.h"
+#include "oat/oat.h"
+#include "oat/oat_file-inl.h"
+#include "oat/oat_file_assistant.h"
+#include "oat/oat_file_assistant_context.h"
+#include "oat/oat_file_manager.h"
+#include "oat/stack_map.h"
 #include "scoped_thread_state_change-inl.h"
 #include "stack.h"
-#include "stack_map.h"
 #include "stream/buffered_output_stream.h"
 #include "stream/file_output_stream.h"
 #include "subtype_check.h"
@@ -2109,7 +2109,7 @@ class ImageDumper {
     if (obj_class->IsArrayClass()) {
       os << StringPrintf("%p: %s length:%d\n", obj, obj_class->PrettyDescriptor().c_str(),
                          obj->AsArray()->GetLength());
-    } else if (obj->IsClass()) {
+    } else if (obj_class->IsClassClass()) {
       ObjPtr<mirror::Class> klass = obj->AsClass();
       os << StringPrintf("%p: java.lang.Class \"%s\" (",
                          obj,
@@ -2146,13 +2146,23 @@ class ImageDumper {
             (value == nullptr) ? obj_class->GetComponentType() : value->GetClass();
         PrettyObjectValue(os, value_class, value);
       }
-    } else if (obj->IsClass()) {
+    } else if (obj_class->IsClassClass()) {
       ObjPtr<mirror::Class> klass = obj->AsClass();
 
       if (kBitstringSubtypeCheckEnabled) {
         os << "SUBTYPE_CHECK_BITS: ";
         SubtypeCheck<ObjPtr<mirror::Class>>::Dump(klass, os);
         os << "\n";
+      }
+
+      if (klass->ShouldHaveEmbeddedVTable()) {
+        os << "EMBEDDED VTABLE:\n";
+        ScopedIndentation indent2(&vios_);
+        const PointerSize pointer_size = image_header_.GetPointerSize();
+        for (size_t i = 0, length = klass->GetEmbeddedVTableLength(); i != length; ++i) {
+          os << i << ": "
+             << ArtMethod::PrettyMethod(klass->GetEmbeddedVTableEntry(i, pointer_size)) << '\n';
+        }
       }
 
       if (klass->NumStaticFields() != 0) {

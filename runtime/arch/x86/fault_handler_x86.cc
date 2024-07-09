@@ -24,7 +24,7 @@
 #include "base/hex_dump.h"
 #include "base/logging.h"  // For VLOG.
 #include "base/macros.h"
-#include "oat_quick_method_header.h"
+#include "oat/oat_quick_method_header.h"
 #include "runtime_globals.h"
 #include "thread-current-inl.h"
 
@@ -69,7 +69,7 @@
 // X86 (and X86_64) specific fault handler functions.
 //
 
-namespace art {
+namespace art HIDDEN {
 
 extern "C" void art_quick_throw_null_pointer_exception_from_signal();
 extern "C" void art_quick_throw_stack_overflow();

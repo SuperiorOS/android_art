@@ -17,10 +17,11 @@
 #ifndef ART_RUNTIME_REFLECTIVE_HANDLE_H_
 #define ART_RUNTIME_REFLECTIVE_HANDLE_H_
 
+#include "base/macros.h"
 #include "base/value_object.h"
 #include "reflective_reference.h"
 
-namespace art {
+namespace art HIDDEN {
 
 // This is a holder similar to Handle<T> that is used to hold reflective references to ArtField and
 // ArtMethod structures. A reflective reference is one that must be updated if the underlying class

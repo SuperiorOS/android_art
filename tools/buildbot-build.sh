@@ -124,8 +124,8 @@ if [ -d frameworks/base ]; then
   # instead of using prebuilts.
   common_targets="$common_targets ${implementation_libs[*]}"
 else
-  # Allow to build successfully in master-art.
-  extra_args="SOONG_ALLOW_MISSING_DEPENDENCIES=true BUILD_BROKEN_DISABLE_BAZEL=true"
+  # Necessary to build successfully in master-art.
+  extra_args="SOONG_ALLOW_MISSING_DEPENDENCIES=true"
   # Switch the build system to unbundled mode in the reduced manifest branch.
   extra_args="$extra_args TARGET_BUILD_UNBUNDLED=true"
 fi
@@ -168,13 +168,15 @@ if [[ $build_target == "yes" ]]; then
   # Targets required to generate a linker configuration for device within the
   # chroot environment. The *.libraries.txt targets are required by
   # the source linkerconfig but not included in the prebuilt one.
-  make_command+=" linkerconfig conv_linker_config sanitizer.libraries.txt vndkcorevariant.libraries.txt"
+  make_command+=" linkerconfig conv_linker_config sanitizer.libraries.txt llndk.libraries.txt"
   # Additional targets needed for the chroot environment.
   make_command+=" event-log-tags"
   # Needed to extract prebuilt APEXes.
   make_command+=" deapexer"
   # Needed to generate the primary boot image for testing.
   make_command+=" generate-boot-image"
+  # Data file needed by the `ArtExecTest.SetTaskProfiles` test.
+  make_command+=" task_profiles.json"
   # Build/install the required APEXes.
   make_command+=" ${apexes[*]}"
   make_command+=" ${specific_targets}"
@@ -433,12 +435,5 @@ EOF
   msginfo "Generating linkerconfig" "in $linkerconfig_out"
   rm -rf $linkerconfig_out
   mkdir -p $linkerconfig_out
-  if [[ $TARGET_ARCH = "riscv64" ]]; then
-    # TODO(b/300291157): One command line for all arches (VNDK flag was dropped as a workaround).
-    $ANDROID_HOST_OUT/bin/linkerconfig --target $linkerconfig_out --root $linkerconfig_root
-  else
-    # TODO(b/300291157): Remove VNDK versions and enable Treble once VNDK deprecation is set as default
-    $ANDROID_HOST_OUT/bin/linkerconfig --target $linkerconfig_out --root $linkerconfig_root --vndk $platform_version --product_vndk $platform_version
-  fi
-  msgnote "Don't be scared by \"Unable to access VNDK APEX\" message, it's not fatal"
+  $ANDROID_HOST_OUT/bin/linkerconfig --target $linkerconfig_out --root $linkerconfig_root
 fi

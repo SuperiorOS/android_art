@@ -234,10 +234,10 @@ TEST_F(DwarfTest, DebugLine) {
   opcodes.SetISA(5);
   opcodes.EndSequence();
   opcodes.DefineFile("file.c", 0, 1000, 2000);
-  DW_CHECK_NEXT("Address            Line   Column File   ISA Discriminator Flags");
-  DW_CHECK_NEXT("------------------ ------ ------ ------ --- ------------- -------------");
-  DW_CHECK_NEXT("0x0000000001000000      1      0      1   0             0  is_stmt");
-  DW_CHECK_NEXT("0x0000000001000100      3      4      2   5             0  basic_block prologue_end epilogue_begin end_sequence");
+  DW_CHECK_NEXT("Address            Line   Column File   ISA Discriminator OpIndex Flags");
+  DW_CHECK_NEXT("------------------ ------ ------ ------ --- ------------- ------- -------------");
+  DW_CHECK_NEXT("0x0000000001000000      1      0      1   0             0       0  is_stmt");
+  DW_CHECK_NEXT("0x0000000001000100      3      4      2   5             0       0  basic_block prologue_end epilogue_begin end_sequence");
 
   WriteDebugLineTable(include_directories, files, opcodes, &debug_line_data_);
 
@@ -256,8 +256,8 @@ TEST_F(DwarfTest, DebugLineSpecialOpcodes) {
   DW_CHECK(".debug_line contents:");
   DW_CHECK("file_names[  1]:");
   DW_CHECK("           name: \"file.c\"");
-  DW_CHECK("Address            Line   Column File   ISA Discriminator Flags");
-  DW_CHECK("------------------ ------ ------ ------ --- ------------- -------------");
+  DW_CHECK("Address            Line   Column File   ISA Discriminator OpIndex Flags");
+  DW_CHECK("------------------ ------ ------ ------ --- ------------- ------- -------------");
   for (int addr_delta = 0; addr_delta < 80; addr_delta += 2) {
     for (int line_delta = 16; line_delta >= -16; --line_delta) {
       pc += addr_delta;
@@ -267,7 +267,7 @@ TEST_F(DwarfTest, DebugLineSpecialOpcodes) {
       ASSERT_EQ(opcodes.CurrentAddress(), pc);
       ASSERT_EQ(opcodes.CurrentLine(), line);
       char expected[1024];
-      sprintf(expected, "0x%016x %6i      0      1   0             0", pc, line);
+      sprintf(expected, "0x%016x %6i      0      1   0             0       0", pc, line);
       DW_CHECK_NEXT(expected);
     }
   }

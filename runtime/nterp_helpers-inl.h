@@ -19,7 +19,7 @@
 
 #include "nterp_helpers.h"
 
-namespace art {
+namespace art HIDDEN {
 
 ALWAYS_INLINE inline uint32_t GetNterpFastPathFlags(std::string_view shorty,
                                                     uint32_t access_flags,

@@ -21,6 +21,8 @@
 
 #include <android-base/logging.h>
 
+#include "base/macros.h"
+
 #if defined(__GLIBC__) || defined(ANDROID_HOST_MUSL)
 #define sigset64_t sigset_t
 #define sigemptyset64 sigemptyset
@@ -29,7 +31,7 @@
 #define sigwait64 sigwait
 #endif
 
-namespace art {
+namespace art HIDDEN {
 
 class SignalSet {
  public:

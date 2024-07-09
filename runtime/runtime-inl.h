@@ -29,7 +29,7 @@
 #include "obj_ptr-inl.h"
 #include "thread_list.h"
 
-namespace art {
+namespace art HIDDEN {
 
 inline bool Runtime::IsClearedJniWeakGlobal(ObjPtr<mirror::Object> obj) {
   return obj == GetClearedJniWeakGlobal();

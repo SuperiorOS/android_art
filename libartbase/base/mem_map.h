@@ -141,9 +141,11 @@ class MemMap {
                              /*out*/std::string* error_msg,
                              bool use_debug_name = true);
 
-  // Request an aligned anonymous region. We can't directly ask for a MAP_SHARED (anonymous or
-  // otherwise) mapping to be aligned as in that case file offset is involved and could make
-  // the starting offset to be out of sync with another mapping of the same file.
+  // Request an aligned anonymous region, where the alignment must be higher
+  // than the runtime gPageSize. We can't directly ask for a MAP_SHARED
+  // (anonymous or otherwise) mapping to be aligned as in that case file offset
+  // is involved and could make the starting offset to be out of sync with
+  // another mapping of the same file.
   static MemMap MapAnonymousAligned(const char* name,
                                     size_t byte_count,
                                     int prot,
@@ -179,24 +181,6 @@ class MemMap {
                         /*reuse=*/ false,
                         reservation,
                         error_msg);
-  }
-
-  // Request an aligned anonymous region with statically known alignment.
-  // This is a wrapper choosing between MapAnonymousAligned and MapAnonymous
-  // depends on whether MapAnonymous would guarantee the requested alignment.
-  template<size_t alignment>
-  static MemMap MapAnonymousAligned(const char* name,
-                                    size_t byte_count,
-                                    int prot,
-                                    bool low_4gb,
-                                    /*out*/std::string* error_msg) {
-    static_assert(IsPowerOfTwo(alignment));
-
-    if (alignment <= kMinPageSize) {
-      return MapAnonymous(name, byte_count, prot, low_4gb, error_msg);
-    } else {
-      return MapAnonymousAligned(name, byte_count, prot, low_4gb, alignment, error_msg);
-    }
   }
 
   // Create placeholder for a region allocated by direct call to mmap.
@@ -362,6 +346,17 @@ class MemMap {
   // 'redzone_size_ == 0' indicates that we are not using memory-tool on this mapping.
   size_t GetRedzoneSize() const { return redzone_size_; }
 
+#ifdef ART_PAGE_SIZE_AGNOSTIC
+  static inline size_t GetPageSize() {
+    DCHECK_NE(page_size_, 0u);
+    return page_size_;
+  }
+#else
+  static constexpr size_t GetPageSize() {
+    return GetPageSizeSlow();
+  }
+#endif
+
  private:
   MemMap(const std::string& name,
          uint8_t* begin,
@@ -450,6 +445,10 @@ class MemMap {
   static int TargetMUnmap(void* start, size_t len);
 
   static std::mutex* mem_maps_lock_;
+
+#ifdef ART_PAGE_SIZE_AGNOSTIC
+  static size_t page_size_;
+#endif
 
   friend class MemMapTest;  // To allow access to base_begin_ and base_size_.
 };

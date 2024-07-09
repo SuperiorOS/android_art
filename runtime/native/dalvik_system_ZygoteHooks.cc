@@ -36,8 +36,8 @@
 #include "nativehelper/jni_macros.h"
 #include "nativehelper/scoped_utf_chars.h"
 #include "non_debuggable_classes.h"
-#include "oat_file.h"
-#include "oat_file_manager.h"
+#include "oat/oat_file.h"
+#include "oat/oat_file_manager.h"
 #include "scoped_thread_state_change-inl.h"
 #include "stack.h"
 #include "startup_completed_task.h"
@@ -47,7 +47,7 @@
 
 #include <sys/resource.h>
 
-namespace art {
+namespace art HIDDEN {
 
 // Set to true to always determine the non-debuggable classes even if we would not allow a debugger
 // to actually attach.

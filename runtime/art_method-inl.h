@@ -19,7 +19,6 @@
 
 #include "art_method.h"
 
-#include "art_field.h"
 #include "base/callee_save_type.h"
 #include "class_linker-inl.h"
 #include "common_throws.h"
@@ -32,9 +31,7 @@
 #include "dex/signature.h"
 #include "gc_root-inl.h"
 #include "imtable-inl.h"
-#include "intrinsics_enum.h"
-#include "jit/jit.h"
-#include "jit/profiling_info.h"
+#include "jit/jit_options.h"
 #include "mirror/class-inl.h"
 #include "mirror/dex_cache-inl.h"
 #include "mirror/object-inl.h"
@@ -46,7 +43,7 @@
 #include "runtime-inl.h"
 #include "thread-current-inl.h"
 
-namespace art {
+namespace art HIDDEN {
 
 namespace detail {
 

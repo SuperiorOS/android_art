@@ -589,19 +589,24 @@ void HDeadCodeElimination::ConnectSuccessiveBlocks() {
 }
 
 struct HDeadCodeElimination::TryBelongingInformation {
-  explicit TryBelongingInformation(ScopedArenaAllocator* allocator)
-      : blocks_in_try(allocator->Adapter(kArenaAllocDCE)),
-        coalesced_try_entries(allocator->Adapter(kArenaAllocDCE)) {}
+  TryBelongingInformation(HGraph* graph, ScopedArenaAllocator* allocator)
+      : blocks_in_try(allocator, graph->GetBlocks().size(), /*expandable=*/false, kArenaAllocDCE),
+        coalesced_try_entries(
+            allocator, graph->GetBlocks().size(), /*expandable=*/false, kArenaAllocDCE) {
+    blocks_in_try.ClearAllBits();
+    coalesced_try_entries.ClearAllBits();
+  }
 
   // Which blocks belong in the try.
-  ScopedArenaSet<HBasicBlock*> blocks_in_try;
+  ArenaBitVector blocks_in_try;
   // Which other try entries are referencing this same try.
-  ScopedArenaSet<HBasicBlock*> coalesced_try_entries;
+  ArenaBitVector coalesced_try_entries;
 };
 
 bool HDeadCodeElimination::CanPerformTryRemoval(const TryBelongingInformation& try_belonging_info) {
-  for (HBasicBlock* block : try_belonging_info.blocks_in_try) {
-    for (HInstructionIterator it(block->GetInstructions()); !it.Done(); it.Advance()) {
+  const ArenaVector<HBasicBlock*>& blocks = graph_->GetBlocks();
+  for (uint32_t i : try_belonging_info.blocks_in_try.Indexes()) {
+    for (HInstructionIterator it(blocks[i]->GetInstructions()); !it.Done(); it.Advance()) {
       if (it.Current()->CanThrow()) {
         return false;
       }
@@ -644,14 +649,17 @@ void HDeadCodeElimination::RemoveTry(HBasicBlock* try_entry,
   DCHECK(try_entry->GetLastInstruction()->AsTryBoundary()->IsEntry());
   DisconnectHandlersAndUpdateTryBoundary(try_entry, any_block_in_loop);
 
-  for (HBasicBlock* other_try_entry : try_belonging_info.coalesced_try_entries) {
+  const ArenaVector<HBasicBlock*>& blocks = graph_->GetBlocks();
+  for (uint32_t i : try_belonging_info.coalesced_try_entries.Indexes()) {
+    HBasicBlock* other_try_entry = blocks[i];
     DCHECK(other_try_entry->EndsWithTryBoundary());
     DCHECK(other_try_entry->GetLastInstruction()->AsTryBoundary()->IsEntry());
     DisconnectHandlersAndUpdateTryBoundary(other_try_entry, any_block_in_loop);
   }
 
   // Update the blocks in the try.
-  for (HBasicBlock* block : try_belonging_info.blocks_in_try) {
+  for (uint32_t i : try_belonging_info.blocks_in_try.Indexes()) {
+    HBasicBlock* block = blocks[i];
     // Update the try catch information since now the try doesn't exist.
     block->SetTryCatchInformation(nullptr);
     if (block->IsInLoop()) {
@@ -694,33 +702,35 @@ bool HDeadCodeElimination::RemoveUnneededTries() {
   ScopedArenaAllocator allocator(graph_->GetArenaStack());
 
   // Collect which blocks are part of which try.
-  std::unordered_map<HBasicBlock*, TryBelongingInformation> tries;
+  ScopedArenaUnorderedMap<HBasicBlock*, TryBelongingInformation> tries(
+      allocator.Adapter(kArenaAllocDCE));
   for (HBasicBlock* block : graph_->GetReversePostOrderSkipEntryBlock()) {
     if (block->IsTryBlock()) {
       HBasicBlock* key = block->GetTryCatchInformation()->GetTryEntry().GetBlock();
       auto it = tries.find(key);
       if (it == tries.end()) {
-        it = tries.insert({key, TryBelongingInformation(&allocator)}).first;
+        it = tries.insert({key, TryBelongingInformation(graph_, &allocator)}).first;
       }
-      it->second.blocks_in_try.insert(block);
+      it->second.blocks_in_try.SetBit(block->GetBlockId());
     }
   }
 
   // Deduplicate the tries which have different try entries but they are really the same try.
   for (auto it = tries.begin(); it != tries.end(); it++) {
-    DCHECK(it->first->EndsWithTryBoundary());
-    HTryBoundary* try_boundary = it->first->GetLastInstruction()->AsTryBoundary();
+    HBasicBlock* block = it->first;
+    DCHECK(block->EndsWithTryBoundary());
+    HTryBoundary* try_boundary = block->GetLastInstruction()->AsTryBoundary();
     for (auto other_it = next(it); other_it != tries.end(); /*other_it++ in the loop*/) {
-      DCHECK(other_it->first->EndsWithTryBoundary());
-      HTryBoundary* other_try_boundary = other_it->first->GetLastInstruction()->AsTryBoundary();
+      HBasicBlock* other_block = other_it->first;
+      DCHECK(other_block->EndsWithTryBoundary());
+      HTryBoundary* other_try_boundary = other_block->GetLastInstruction()->AsTryBoundary();
       if (try_boundary->HasSameExceptionHandlersAs(*other_try_boundary)) {
         // Merge the entries as they are really the same one.
         // Block merging.
-        it->second.blocks_in_try.insert(other_it->second.blocks_in_try.begin(),
-                                        other_it->second.blocks_in_try.end());
+        it->second.blocks_in_try.Union(&other_it->second.blocks_in_try);
 
         // Add the coalesced try entry to update it too.
-        it->second.coalesced_try_entries.insert(other_it->first);
+        it->second.coalesced_try_entries.SetBit(other_block->GetBlockId());
 
         // Erase the other entry.
         other_it = tries.erase(other_it);
@@ -791,22 +801,22 @@ bool HDeadCodeElimination::RemoveEmptyIfs() {
     //   5
     // where 2, 3, and 4 are single HGoto blocks, and block 5 has Phis.
     ScopedArenaAllocator allocator(graph_->GetArenaStack());
-    ScopedArenaHashSet<HBasicBlock*> visited_blocks(allocator.Adapter(kArenaAllocDCE));
+    ArenaBitVector visited_blocks(
+        &allocator, graph_->GetBlocks().size(), /*expandable=*/ false, kArenaAllocDCE);
+    visited_blocks.ClearAllBits();
     HBasicBlock* merge_true = true_block;
-    visited_blocks.insert(merge_true);
+    visited_blocks.SetBit(merge_true->GetBlockId());
     while (merge_true->IsSingleGoto()) {
       merge_true = merge_true->GetSuccessors()[0];
-      visited_blocks.insert(merge_true);
+      visited_blocks.SetBit(merge_true->GetBlockId());
     }
 
     HBasicBlock* merge_false = false_block;
-    while (visited_blocks.find(merge_false) == visited_blocks.end() &&
-           merge_false->IsSingleGoto()) {
+    while (!visited_blocks.IsBitSet(merge_false->GetBlockId()) && merge_false->IsSingleGoto()) {
       merge_false = merge_false->GetSuccessors()[0];
     }
 
-    if (visited_blocks.find(merge_false) == visited_blocks.end() ||
-        !merge_false->GetPhis().IsEmpty()) {
+    if (!visited_blocks.IsBitSet(merge_false->GetBlockId()) || !merge_false->GetPhis().IsEmpty()) {
       // TODO(solanes): We could allow Phis iff both branches have the same value for all Phis. This
       // may not be covered by SsaRedundantPhiElimination in cases like `HPhi[A,A,B]` where the Phi
       // itself is not redundant for the general case but it is for a pair of branches.
@@ -815,8 +825,11 @@ bool HDeadCodeElimination::RemoveEmptyIfs() {
 
     // Data structures to help remove now-dead instructions.
     ScopedArenaQueue<HInstruction*> maybe_remove(allocator.Adapter(kArenaAllocDCE));
-    ScopedArenaHashSet<HInstruction*> visited(allocator.Adapter(kArenaAllocDCE));
+    ArenaBitVector visited(
+        &allocator, graph_->GetCurrentInstructionId(), /*expandable=*/ false, kArenaAllocDCE);
+    visited.ClearAllBits();
     maybe_remove.push(if_instr->InputAt(0));
+    visited.SetBit(if_instr->GetId());
 
     // Swap HIf with HGoto
     block->ReplaceAndRemoveInstructionWith(
@@ -834,12 +847,12 @@ bool HDeadCodeElimination::RemoveEmptyIfs() {
     while (!maybe_remove.empty()) {
       HInstruction* instr = maybe_remove.front();
       maybe_remove.pop();
-      if (visited.find(instr) != visited.end()) {
-        continue;
-      }
-      visited.insert(instr);
       if (instr->IsDeadAndRemovable()) {
         for (HInstruction* input : instr->GetInputs()) {
+          if (visited.IsBitSet(input->GetId())) {
+            continue;
+          }
+          visited.SetBit(input->GetId());
           maybe_remove.push(input);
         }
         instr->GetBlock()->RemoveInstructionOrPhi(instr);
@@ -924,7 +937,7 @@ void HDeadCodeElimination::RemoveDeadInstructions() {
     for (HBackwardInstructionIterator phi_it(block->GetPhis()); !phi_it.Done(); phi_it.Advance()) {
       DCHECK(phi_it.Current()->IsPhi());
       HPhi* phi = phi_it.Current()->AsPhi();
-      if (phi->IsDeadAndRemovable()) {
+      if (phi->IsPhiDeadAndRemovable()) {
         block->RemovePhi(phi);
         MaybeRecordStat(stats_, MethodCompilationStat::kRemovedDeadPhi);
       }

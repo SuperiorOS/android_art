@@ -24,7 +24,7 @@
 #include "base/macros.h"
 #include "handle.h"
 
-namespace art {
+namespace art HIDDEN {
 
 namespace dex {
 struct ClassDef;
@@ -158,7 +158,7 @@ class ReflectiveValueVisitCallback {
       REQUIRES(Locks::mutator_lock_) = 0;
 };
 
-class RuntimeCallbacks {
+class EXPORT RuntimeCallbacks {
  public:
   RuntimeCallbacks();
 

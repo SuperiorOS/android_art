@@ -36,8 +36,8 @@ public class Main {
   /// CHECK:       InvokeInterface method_name:java.lang.CharSequence.charAt
 
   /// CHECK-START: char Main.$noinline$inlinePolymorphic(java.lang.CharSequence) inliner (after)
-  /// CHECK:       InvokeVirtual method_name:java.lang.String.charAt intrinsic:StringCharAt
-  /// CHECK:       Deoptimize
+  /// CHECK-DAG:   InvokeVirtual method_name:java.lang.String.charAt intrinsic:StringCharAt
+  /// CHECK-DAG:   Deoptimize
 
   /// CHECK-START: char Main.$noinline$inlinePolymorphic(java.lang.CharSequence) instruction_simplifier$after_inlining (after)
   /// CHECK:       Deoptimize

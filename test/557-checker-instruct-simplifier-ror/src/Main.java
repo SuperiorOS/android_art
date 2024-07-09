@@ -503,6 +503,7 @@ public class Main {
   }
 
   //  (j << distance) + (j >>> -distance)
+  // We can't perform the optimization as distance might be `0`, resulting in the wrong value.
 
   /// CHECK-START: long Main.rol_long_reg_v_negv_add(long, int) instruction_simplifier (before)
   /// CHECK:          <<ArgValue:j\d+>>     ParameterValue
@@ -516,19 +517,17 @@ public class Main {
   /// CHECK-START: long Main.rol_long_reg_v_negv_add(long, int) instruction_simplifier (after)
   /// CHECK:          <<ArgValue:j\d+>>     ParameterValue
   /// CHECK:          <<ArgDistance:i\d+>>  ParameterValue
-  /// CHECK:          <<Neg:i\d+>>          Neg [<<ArgDistance>>]
-  /// CHECK:          <<Ror:j\d+>>          Ror [<<ArgValue>>,<<Neg>>]
-  /// CHECK:                                Return [<<Ror>>]
-
-  /// CHECK-START: long Main.rol_long_reg_v_negv_add(long, int) instruction_simplifier (after)
-  /// CHECK-NOT:  Add
-  /// CHECK-NOT:  Shl
-  /// CHECK-NOT:  UShr
+  /// CHECK-DAG:      <<Neg:i\d+>>          Neg [<<ArgDistance>>]
+  /// CHECK-DAG:      <<UShr:j\d+>>         UShr [<<ArgValue>>,<<Neg>>]
+  /// CHECK-DAG:      <<Shl:j\d+>>          Shl [<<ArgValue>>,<<ArgDistance>>]
+  /// CHECK:          <<Add:j\d+>>          Add [<<Shl>>,<<UShr>>]
+  /// CHECK:                                Return [<<Add>>]
   public static long rol_long_reg_v_negv_add(long value, int distance) {
     return (value << distance) + (value >>> -distance);
   }
 
   //  (j << distance) ^ (j >>> -distance)
+  // We can't perform the optimization as distance might be `0`, resulting in the wrong value.
 
   /// CHECK-START: long Main.rol_long_reg_v_negv_xor(long, int) instruction_simplifier (before)
   /// CHECK:          <<ArgValue:j\d+>>     ParameterValue
@@ -542,16 +541,58 @@ public class Main {
   /// CHECK-START: long Main.rol_long_reg_v_negv_xor(long, int) instruction_simplifier (after)
   /// CHECK:          <<ArgValue:j\d+>>     ParameterValue
   /// CHECK:          <<ArgDistance:i\d+>>  ParameterValue
-  /// CHECK:          <<Neg:i\d+>>          Neg [<<ArgDistance>>]
-  /// CHECK:          <<Ror:j\d+>>          Ror [<<ArgValue>>,<<Neg>>]
-  /// CHECK:                                Return [<<Ror>>]
+  /// CHECK-DAG:      <<Neg:i\d+>>          Neg [<<ArgDistance>>]
+  /// CHECK-DAG:      <<UShr:j\d+>>         UShr [<<ArgValue>>,<<Neg>>]
+  /// CHECK-DAG:      <<Shl:j\d+>>          Shl [<<ArgValue>>,<<ArgDistance>>]
+  /// CHECK:          <<Xor:j\d+>>          Xor [<<Shl>>,<<UShr>>]
+  /// CHECK:                                Return [<<Xor>>]
 
-  /// CHECK-START: long Main.rol_long_reg_v_negv_xor(long, int) instruction_simplifier (after)
-  /// CHECK-NOT:  Xor
-  /// CHECK-NOT:  Shl
-  /// CHECK-NOT:  UShr
   public static long rol_long_reg_v_negv_xor(long value, int distance) {
     return (value << distance) ^ (value >>> -distance);
+  }
+
+  /// CHECK-START: void Main.$noinline$testDontOptimizeAddIntoRotate_Int() disassembly (after)
+  /// CHECK-NOT: Ror
+  public static void $noinline$testDontOptimizeAddIntoRotate_Int() {
+      int distance = returnFalse() ? 1 : 0;
+      int value = -512667375;
+      int expected_result = 2 * value;
+      int result = (value >>> distance) + (value << -distance);
+      assertIntEquals(expected_result, result);
+  }
+
+  /// CHECK-START: void Main.$noinline$testDontOptimizeAddIntoRotate_Long() disassembly (after)
+  /// CHECK-NOT: Ror
+  public static void $noinline$testDontOptimizeAddIntoRotate_Long() {
+      int distance = returnFalse() ? 1 : 0;
+      long value = -512667375L;
+      long expected_result = 2L * value;
+      long result = (value >>> distance) + (value << -distance);
+      assertLongEquals(expected_result, result);
+  }
+
+  /// CHECK-START: void Main.$noinline$testDontOptimizeXorIntoRotate_Int() disassembly (after)
+  /// CHECK-NOT: Ror
+  public static void $noinline$testDontOptimizeXorIntoRotate_Int() {
+      int distance = returnFalse() ? 1 : 0;
+      int value = -512667375;
+      int expected_result = 0;
+      int result = (value >>> distance) ^ (value << -distance);
+      assertIntEquals(expected_result, result);
+  }
+
+  /// CHECK-START: void Main.$noinline$testDontOptimizeXorIntoRotate_Long() disassembly (after)
+  /// CHECK-NOT: Ror
+  public static void $noinline$testDontOptimizeXorIntoRotate_Long() {
+      int distance = returnFalse() ? 1 : 0;
+      long value = -512667375L;
+      long expected_result = 0;
+      long result = (value >>> distance) ^ (value << -distance);
+      assertLongEquals(expected_result, result);
+  }
+
+  static boolean returnFalse() {
+    return false;
   }
 
   public static void main(String[] args) {
@@ -581,5 +622,11 @@ public class Main {
 
     assertLongEquals(32L, rol_long_reg_v_negv_add(8L, 2));
     assertLongEquals(32L, rol_long_reg_v_negv_xor(8L, 2));
+
+    $noinline$testDontOptimizeAddIntoRotate_Int();
+    $noinline$testDontOptimizeAddIntoRotate_Long();
+
+    $noinline$testDontOptimizeXorIntoRotate_Int();
+    $noinline$testDontOptimizeXorIntoRotate_Long();
   }
 }

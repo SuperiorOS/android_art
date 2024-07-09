@@ -217,8 +217,10 @@ def target_builders():
         short_name="dbg",
         dimensions=target_dims,
         properties={
+            "bitness": 32,
             "device": "angler-armv7",
             "debug": True,
+            "product": "arm_krait",
         }
     )
     ci_builder(
@@ -227,10 +229,12 @@ def target_builders():
         short_name="ngen",
         dimensions=userfault_gc_target_dims,
         properties={
+            "bitness": 32,
             "device": "angler-armv7",
             "debug": True,
             "concurrent_collector": False,
             "generational_cc": False,
+            "product": "arm_krait",
         }
     )
     ci_builder(
@@ -239,8 +243,10 @@ def target_builders():
         short_name="ndbg",
         dimensions=target_dims,
         properties={
+            "bitness": 32,
             "device": "angler-armv7",
             "debug": False,
+            "product": "arm_krait",
         }
     )
     ci_builder(
@@ -249,8 +255,10 @@ def target_builders():
         short_name="dbg",
         dimensions=target_dims,
         properties={
+            "bitness": 64,
             "device": "angler-armv8",
             "debug": True,
+            "product": "armv8",
         }
     )
     ci_builder(
@@ -259,10 +267,12 @@ def target_builders():
         short_name="ngen",
         dimensions=userfault_gc_target_dims,
         properties={
+            "bitness": 64,
             "device": "angler-armv8",
             "debug": True,
             "concurrent_collector": False,
             "generational_cc": False,
+            "product": "armv8",
         }
     )
     ci_builder(
@@ -271,8 +281,10 @@ def target_builders():
         short_name="ndbg",
         dimensions=target_dims,
         properties={
+            "bitness": 64,
             "device": "angler-armv8",
             "debug": False,
+            "product": "armv8",
         }
     )
     ci_builder(
@@ -281,9 +293,11 @@ def target_builders():
         short_name="dbg",
         dimensions=target_dims,
         properties={
+            "bitness": 32,
             "device": "bullhead-armv7",
             "debug": False,
             "gcstress": True,
+            "product": "arm_krait",
         }
     )
     ci_builder(
@@ -292,9 +306,11 @@ def target_builders():
         short_name="dbg",
         dimensions=target_dims,
         properties={
+            "bitness": 64,
             "device": "bullhead-armv8",
             "debug": True,
             "gcstress": True,
+            "product": "armv8",
         }
     )
     ci_builder(
@@ -303,9 +319,11 @@ def target_builders():
         short_name="ndbg",
         dimensions=target_dims,
         properties={
+            "bitness": 64,
             "device": "bullhead-armv8",
             "debug": False,
             "gcstress": True,
+            "product": "armv8",
         }
     )
     ci_builder(
@@ -314,9 +332,11 @@ def target_builders():
         short_name="dbg",
         dimensions=target_dims,
         properties={
+            "bitness": 32,
             "device": "walleye-armv7",
             "debug": True,
             "heap_poisoning": True,
+            "product": "arm_krait",
         }
     )
     ci_builder(
@@ -325,9 +345,11 @@ def target_builders():
         short_name="dbg",
         dimensions=target_dims,
         properties={
+            "bitness": 64,
             "device": "walleye-armv8",
             "debug": True,
             "heap_poisoning": True,
+            "product": "armv8",
         }
     )
     ci_builder(
@@ -336,9 +358,11 @@ def target_builders():
         short_name="ndbg",
         dimensions=target_dims,
         properties={
+            "bitness": 64,
             "device": "walleye-armv8",
             "debug": False,
             "heap_poisoning": True,
+            "product": "armv8",
         }
     )
 
@@ -465,15 +489,31 @@ def host_builders():
         }
     )
     ci_builder(
+        name="qemu-armv8-ndebug",
+        category="qemu|armv8",
+        short_name="ndbg",
+        dimensions=host_dims,
+        is_fyi=True,
+        properties={
+            "bitness": 64,
+            "debug": False,
+            "device": "qemu-armv8",
+            "on_virtual_machine": True,
+            "product": "armv8",
+        }
+    )
+    ci_builder(
         name="qemu-riscv64-ndebug",
         category="qemu|riscv64",
         short_name="ndbg",
         dimensions=host_dims,
         is_fyi=True,
         properties={
+            "bitness": 64,
             "debug": False,
             "device": "qemu-riscv64",
             "on_virtual_machine": True,
+            "product": "riscv64",
         }
     )
     ci_builder(
@@ -482,10 +522,12 @@ def host_builders():
         short_name="bo",
         dimensions=host_dims,
         properties={
+            "bitness": 64,
             "build_only": True,
             "debug": False,
             "device": "qemu-riscv64",
             "on_virtual_machine": True,
+            "product": "riscv64",
         }
     )
 

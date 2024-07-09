@@ -36,18 +36,18 @@
 #include "gc/space/image_space.h"
 #include "gc/space/space-inl.h"
 #include "gc/verification.h"
-#include "image-inl.h"
 #include "intern_table.h"
 #include "mirror/class-inl.h"
 #include "mirror/object-inl.h"
 #include "mirror/object-refvisitor-inl.h"
 #include "mirror/object_reference.h"
+#include "oat/image-inl.h"
 #include "scoped_thread_state_change-inl.h"
 #include "thread-inl.h"
 #include "thread_list.h"
 #include "well_known_classes.h"
 
-namespace art {
+namespace art HIDDEN {
 namespace gc {
 namespace collector {
 
@@ -480,7 +480,8 @@ class ConcurrentCopying::ThreadFlipVisitor : public Closure, public RootVisitor 
   }
 
   void Run(Thread* thread) override REQUIRES_SHARED(Locks::mutator_lock_) {
-    // Note: self is not necessarily equal to thread since thread may be suspended.
+    // We are either running this in the target thread, or the target thread will wait for us
+    // before switching back to runnable.
     Thread* self = Thread::Current();
     CHECK(thread == self || thread->GetState() != ThreadState::kRunnable)
         << thread->GetState() << " thread " << thread << " self " << self;
@@ -495,7 +496,6 @@ class ConcurrentCopying::ThreadFlipVisitor : public Closure, public RootVisitor 
     // We can use the non-CAS VisitRoots functions below because we update thread-local GC roots
     // only.
     thread->VisitRoots(this, kVisitRootFlagAllRoots);
-    concurrent_copying_->GetBarrier().Pass(self);
   }
 
   void VisitRoots(mirror::Object*** roots,
@@ -764,17 +764,12 @@ void ConcurrentCopying::FlipThreadRoots() {
   }
   Thread* self = Thread::Current();
   Locks::mutator_lock_->AssertNotHeld(self);
-  gc_barrier_->Init(self, 0);
   ThreadFlipVisitor thread_flip_visitor(this, heap_->use_tlab_);
   FlipCallback flip_callback(this);
 
-  size_t barrier_count = Runtime::Current()->GetThreadList()->FlipThreadRoots(
+  Runtime::Current()->GetThreadList()->FlipThreadRoots(
       &thread_flip_visitor, &flip_callback, this, GetHeap()->GetGcPauseListener());
 
-  {
-    ScopedThreadStateChange tsc(self, ThreadState::kWaitingForCheckPointsToRun);
-    gc_barrier_->Increment(self, barrier_count);
-  }
   is_asserting_to_space_invariant_ = true;
   QuasiAtomic::ThreadFenceForConstructor();  // TODO: Remove?
   if (kVerboseMode) {
@@ -1222,9 +1217,9 @@ bool ConcurrentCopying::TestAndSetMarkBitForRef(mirror::Object* ref) {
     DCHECK(heap_mark_bitmap_->GetContinuousSpaceBitmap(ref)->Test(ref));
     return true;
   } else {
-    // Should be a large object. Must be page aligned and the LOS must exist.
-    if (kIsDebugBuild
-        && (!IsAligned<kLargeObjectAlignment>(ref) || heap_->GetLargeObjectsSpace() == nullptr)) {
+    // Should be a large object. Must be aligned and the LOS must exist.
+    if (kIsDebugBuild && (!IsAlignedParam(ref, space::LargeObjectSpace::ObjectAlignment()) ||
+                          heap_->GetLargeObjectsSpace() == nullptr)) {
       // It must be heap corruption. Remove memory protection and dump data.
       region_space_->Unprotect();
       heap_->GetVerification()->LogHeapCorruption(/* obj */ nullptr,
@@ -1251,9 +1246,9 @@ bool ConcurrentCopying::TestMarkBitmapForRef(mirror::Object* ref) {
     DCHECK(heap_mark_bitmap_->GetContinuousSpaceBitmap(ref)->Test(ref));
     return true;
   } else {
-    // Should be a large object. Must be page aligned and the LOS must exist.
-    if (kIsDebugBuild
-        && (!IsAligned<kLargeObjectAlignment>(ref) || heap_->GetLargeObjectsSpace() == nullptr)) {
+    // Should be a large object. Must be aligned and the LOS must exist.
+    if (kIsDebugBuild && (!IsAlignedParam(ref, space::LargeObjectSpace::ObjectAlignment()) ||
+                          heap_->GetLargeObjectsSpace() == nullptr)) {
       // It must be heap corruption. Remove memory protection and dump data.
       region_space_->Unprotect();
       heap_->GetVerification()->LogHeapCorruption(/* obj */ nullptr,
@@ -2310,7 +2305,7 @@ inline void ConcurrentCopying::ProcessMarkStackRef(mirror::Object* to_ref) {
             heap_->GetNonMovingSpace()->GetMarkBitmap();
         const bool is_los = !mark_bitmap->HasAddress(to_ref);
         if (is_los) {
-          if (!IsAligned<kLargeObjectAlignment>(to_ref)) {
+          if (!IsAlignedParam(to_ref, space::LargeObjectSpace::ObjectAlignment())) {
             // Ref is a large object that is not aligned, it must be heap
             // corruption. Remove memory protection and dump data before
             // AtomicSetReadBarrierState since it will fault if the address is not
@@ -3685,7 +3680,7 @@ mirror::Object* ConcurrentCopying::MarkNonMoving(Thread* const self,
   accounting::LargeObjectBitmap* los_bitmap = nullptr;
   const bool is_los = !mark_bitmap->HasAddress(ref);
   if (is_los) {
-    if (!IsAligned<kLargeObjectAlignment>(ref)) {
+    if (!IsAlignedParam(ref, space::LargeObjectSpace::ObjectAlignment())) {
       // Ref is a large object that is not aligned, it must be heap
       // corruption. Remove memory protection and dump data before
       // AtomicSetReadBarrierState since it will fault if the address is not

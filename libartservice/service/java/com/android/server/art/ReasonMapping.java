@@ -188,13 +188,14 @@ public class ReasonMapping {
 
     /**
      * Loads the concurrency from the system property, for batch dexopt ({@link
-     * ArtManagerLocal#dexoptPackages}), or 1 if the system property is not found or cannot be
-     * parsed.
+     * ArtManagerLocal#dexoptPackages}). The default is tuned to strike a good balance between
+     * device load and dexopt coverage, depending on the situation.
      *
      * @hide
      */
     public static int getConcurrencyForReason(@NonNull @BatchDexoptReason String reason) {
         return SystemProperties.getInt("persist.device_config.runtime." + reason + "_concurrency",
-                SystemProperties.getInt("pm.dexopt." + reason + ".concurrency", 1 /* def */));
+                SystemProperties.getInt("pm.dexopt." + reason + ".concurrency",
+                        reason.equals(REASON_BG_DEXOPT) ? 4 : 1 /* def */));
     }
 }

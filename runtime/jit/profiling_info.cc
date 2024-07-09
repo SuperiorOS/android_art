@@ -23,7 +23,7 @@
 #include "scoped_thread_state_change-inl.h"
 #include "thread.h"
 
-namespace art {
+namespace art HIDDEN {
 
 ProfilingInfo::ProfilingInfo(ArtMethod* method,
                              const std::vector<uint32_t>& inline_cache_entries,
@@ -50,22 +50,16 @@ uint16_t ProfilingInfo::GetOptimizeThreshold() {
   return Runtime::Current()->GetJITOptions()->GetOptimizeThreshold();
 }
 
-ProfilingInfo* ProfilingInfo::Create(Thread* self, ArtMethod* method) {
+ProfilingInfo* ProfilingInfo::Create(Thread* self,
+                                     ArtMethod* method,
+                                     const std::vector<uint32_t>& inline_cache_entries) {
   // Walk over the dex instructions of the method and keep track of
   // instructions we are interested in profiling.
   DCHECK(!method->IsNative());
 
-  std::vector<uint32_t> inline_cache_entries;
   std::vector<uint32_t> branch_cache_entries;
   for (const DexInstructionPcPair& inst : method->DexInstructions()) {
     switch (inst->Opcode()) {
-      case Instruction::INVOKE_VIRTUAL:
-      case Instruction::INVOKE_VIRTUAL_RANGE:
-      case Instruction::INVOKE_INTERFACE:
-      case Instruction::INVOKE_INTERFACE_RANGE:
-        inline_cache_entries.push_back(inst.DexPc());
-        break;
-
       case Instruction::IF_EQ:
       case Instruction::IF_EQZ:
       case Instruction::IF_NE:
@@ -102,9 +96,7 @@ InlineCache* ProfilingInfo::GetInlineCache(uint32_t dex_pc) {
       return &caches[i];
     }
   }
-  ScopedObjectAccess soa(Thread::Current());
-  LOG(FATAL) << "No inline cache found for "  << ArtMethod::PrettyMethod(method_) << "@" << dex_pc;
-  UNREACHABLE();
+  return nullptr;
 }
 
 BranchCache* ProfilingInfo::GetBranchCache(uint32_t dex_pc) {
@@ -122,6 +114,9 @@ BranchCache* ProfilingInfo::GetBranchCache(uint32_t dex_pc) {
 
 void ProfilingInfo::AddInvokeInfo(uint32_t dex_pc, mirror::Class* cls) {
   InlineCache* cache = GetInlineCache(dex_pc);
+  if (cache == nullptr) {
+    return;
+  }
   for (size_t i = 0; i < InlineCache::kIndividualCacheSize; ++i) {
     mirror::Class* existing = cache->classes_[i].Read<kWithoutReadBarrier>();
     mirror::Class* marked = ReadBarrier::IsMarked(existing);
@@ -165,6 +160,41 @@ ScopedProfilingInfoUse::~ScopedProfilingInfoUse() {
   if (profiling_info_ != nullptr) {
     jit_->GetCodeCache()->DoneCompilerUse(method_, self_);
   }
+}
+
+uint32_t InlineCache::EncodeDexPc(ArtMethod* method,
+                                  const std::vector<uint32_t>& dex_pcs,
+                                  uint32_t inline_max_code_units) {
+  if (kIsDebugBuild) {
+    // Make sure `inline_max_code_units` is always the same.
+    static uint32_t global_max_code_units = inline_max_code_units;
+    CHECK_EQ(global_max_code_units, inline_max_code_units);
+  }
+  if (dex_pcs.size() - 1 > MaxDexPcEncodingDepth(method, inline_max_code_units)) {
+    return -1;
+  }
+  uint32_t size = dex_pcs.size();
+  uint32_t insns_size = method->DexInstructions().InsnsSizeInCodeUnits();
+
+  uint32_t dex_pc = dex_pcs[size - 1];
+  uint32_t shift = MinimumBitsToStore(insns_size - 1);
+  for (uint32_t i = size - 1; i > 0; --i) {
+    DCHECK_LT(shift, BitSizeOf<uint32_t>());
+    dex_pc += ((dex_pcs[i - 1] + 1) << shift);
+    shift += MinimumBitsToStore(inline_max_code_units);
+  }
+  return dex_pc;
+}
+
+uint32_t InlineCache::MaxDexPcEncodingDepth(ArtMethod* method, uint32_t inline_max_code_units) {
+  uint32_t insns_size = method->DexInstructions().InsnsSizeInCodeUnits();
+  uint32_t num_bits = MinimumBitsToStore(insns_size - 1);
+  uint32_t depth = 0;
+  do {
+    depth++;
+    num_bits += MinimumBitsToStore(inline_max_code_units);
+  } while (num_bits <= BitSizeOf<uint32_t>());
+  return depth - 1;
 }
 
 }  // namespace art

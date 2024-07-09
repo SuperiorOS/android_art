@@ -27,7 +27,7 @@
 #include "base/value_object.h"
 #include "dex_register_location.h"
 #include "nodes.h"
-#include "stack_map.h"
+#include "oat/stack_map.h"
 
 namespace art HIDDEN {
 
@@ -110,7 +110,7 @@ class StackMapStream : public DeletableArenaObject<kArenaAllocStackMapStream> {
 
   // Invokes the callback with pointer of each BitTableBuilder field.
   template<typename Callback>
-  void ForEachBitTable(Callback callback) {
+  void ForEachBitTable(Callback&& callback) {
     size_t index = 0;
     callback(index++, &stack_maps_);
     callback(index++, &register_masks_);

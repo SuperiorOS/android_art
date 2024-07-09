@@ -55,21 +55,21 @@
 #include "exec_utils.h"
 #include "gc/accounting/space_bitmap-inl.h"
 #include "gc/task_processor.h"
-#include "image-inl.h"
-#include "image.h"
 #include "intern_table-inl.h"
 #include "mirror/class-inl.h"
 #include "mirror/executable-inl.h"
 #include "mirror/object-inl.h"
 #include "mirror/object-refvisitor-inl.h"
 #include "mirror/var_handle.h"
-#include "oat.h"
-#include "oat_file.h"
+#include "oat/image-inl.h"
+#include "oat/image.h"
+#include "oat/oat.h"
+#include "oat/oat_file.h"
 #include "profile/profile_compilation_info.h"
 #include "runtime.h"
 #include "space-inl.h"
 
-namespace art {
+namespace art HIDDEN {
 namespace gc {
 namespace space {
 

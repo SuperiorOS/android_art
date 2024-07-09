@@ -22,7 +22,7 @@
 
 #include "base/common_art_test.h"
 
-namespace art {
+namespace art HIDDEN {
 
 class VdexFileTest : public CommonArtTest {};
 

@@ -19,13 +19,15 @@
 #include <iomanip>
 #include <sstream>
 
+#include <android-base/unique_fd.h>
+
 #include "art_field-inl.h"
 #include "base/file_utils.h"
 #include "base/logging.h"
 #include "mirror/class-inl.h"
 #include "mirror/object-refvisitor-inl.h"
 
-namespace art {
+namespace art HIDDEN {
 namespace gc {
 
 std::string Verification::DumpRAMAroundAddress(uintptr_t addr, uintptr_t bytes) const {

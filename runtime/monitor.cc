@@ -14,12 +14,11 @@
  * limitations under the License.
  */
 
-#include "monitor-inl.h"
+#include <android-base/properties.h>
 
 #include <vector>
 
 #include "android-base/stringprintf.h"
-
 #include "art_method-inl.h"
 #include "base/logging.h"  // For VLOG.
 #include "base/mutex.h"
@@ -32,9 +31,11 @@
 #include "dex/dex_file_types.h"
 #include "dex/dex_instruction-inl.h"
 #include "entrypoints/entrypoint_utils-inl.h"
+#include "gc/verification-inl.h"
 #include "lock_word-inl.h"
 #include "mirror/class-inl.h"
 #include "mirror/object-inl.h"
+#include "monitor-inl.h"
 #include "object_callbacks.h"
 #include "scoped_thread_state_change-inl.h"
 #include "stack.h"
@@ -42,11 +43,10 @@
 #include "thread_list.h"
 #include "verifier/method_verifier.h"
 #include "well_known_classes.h"
-#include <android-base/properties.h>
 
 static_assert(ART_USE_FUTEXES);
 
-namespace art {
+namespace art HIDDEN {
 
 using android::base::StringPrintf;
 
@@ -1005,7 +1005,7 @@ bool Monitor::Deflate(Thread* self, ObjPtr<mirror::Object> obj) {
     if (monitor->num_waiters_.load(std::memory_order_relaxed) > 0) {
       return false;
     }
-    if (!monitor->monitor_lock_.ExclusiveTryLock(self)) {
+    if (!monitor->monitor_lock_.ExclusiveTryLock</* check= */ false>(self)) {
       // We cannot deflate a monitor that's currently held. It's unclear whether we should if
       // we could.
       return false;
@@ -1054,8 +1054,11 @@ void Monitor::Inflate(Thread* self, Thread* owner, ObjPtr<mirror::Object> obj, i
   }
 }
 
-void Monitor::InflateThinLocked(Thread* self, Handle<mirror::Object> obj, LockWord lock_word,
-                                uint32_t hash_code) {
+void Monitor::InflateThinLocked(Thread* self,
+                                Handle<mirror::Object> obj,
+                                LockWord lock_word,
+                                uint32_t hash_code,
+                                int attempt_of_4) {
   DCHECK_EQ(lock_word.GetState(), LockWord::kThinLocked);
   uint32_t owner_thread_id = lock_word.ThinLockOwner();
   if (owner_thread_id == self->GetThreadId()) {
@@ -1065,13 +1068,11 @@ void Monitor::InflateThinLocked(Thread* self, Handle<mirror::Object> obj, LockWo
     ThreadList* thread_list = Runtime::Current()->GetThreadList();
     // Suspend the owner, inflate. First change to blocked and give up mutator_lock_.
     self->SetMonitorEnterObject(obj.Get());
-    bool timed_out;
     Thread* owner;
     {
       ScopedThreadSuspension sts(self, ThreadState::kWaitingForLockInflation);
-      owner = thread_list->SuspendThreadByThreadId(owner_thread_id,
-                                                   SuspendReason::kInternal,
-                                                   &timed_out);
+      owner = thread_list->SuspendThreadByThreadId(
+          owner_thread_id, SuspendReason::kInternal, attempt_of_4);
     }
     if (owner != nullptr) {
       // We succeeded in suspending the thread, check the lock's status didn't change.
@@ -1110,6 +1111,7 @@ ObjPtr<mirror::Object> Monitor::MonitorEnter(Thread* self,
   uint32_t thread_id = self->GetThreadId();
   size_t contention_count = 0;
   constexpr size_t kExtraSpinIters = 100;
+  int inflation_attempt = 1;
   StackHandleScope<1> hs(self);
   Handle<mirror::Object> h_obj(hs.NewHandle(obj));
   while (true) {
@@ -1156,7 +1158,7 @@ ObjPtr<mirror::Object> Monitor::MonitorEnter(Thread* self,
             continue;  // Go again.
           } else {
             // We'd overflow the recursion count, so inflate the monitor.
-            InflateThinLocked(self, h_obj, lock_word, 0);
+            InflateThinLocked(self, h_obj, lock_word, 0, inflation_attempt++);
           }
         } else {
           if (trylock) {
@@ -1177,7 +1179,7 @@ ObjPtr<mirror::Object> Monitor::MonitorEnter(Thread* self,
           } else {
             contention_count = 0;
             // No ordering required for initial lockword read. Install rereads it anyway.
-            InflateThinLocked(self, h_obj, lock_word, 0);
+            InflateThinLocked(self, h_obj, lock_word, 0, inflation_attempt++);
           }
         }
         continue;  // Start from the beginning.
@@ -1522,18 +1524,29 @@ void Monitor::VisitLocks(StackVisitor* stack_visitor,
       // not be optimized out.
       success = stack_visitor->GetVReg(m, dex_reg, kReferenceVReg, &value);
       if (success) {
-        ObjPtr<mirror::Object> o = reinterpret_cast<mirror::Object*>(value);
-        callback(o, callback_context);
-        break;
+        mirror::Object* mp = reinterpret_cast<mirror::Object*>(value);
+        // TODO(b/299577730) Remove the extra checks here once the underlying bug is fixed.
+        const gc::Verification* v = Runtime::Current()->GetHeap()->GetVerification();
+        if (v->IsValidObject(mp)) {
+          ObjPtr<mirror::Object> o = mp;
+          callback(o, callback_context);
+          break;
+        } else {
+          LOG(ERROR) << "Encountered bad lock object: " << std::hex << value << std::dec;
+          success = false;
+        }
       }
     }
-    DCHECK(success) << "Failed to find/read reference for monitor-enter at dex pc "
-                    << dex_lock_info.dex_pc
-                    << " in method "
-                    << m->PrettyMethod();
     if (!success) {
-      LOG(WARNING) << "Had a lock reported for dex pc " << dex_lock_info.dex_pc
-                   << " but was not able to fetch a corresponding object!";
+      LOG(ERROR) << "Failed to find/read reference for monitor-enter at dex pc "
+                 << dex_lock_info.dex_pc << " in method " << m->PrettyMethod();
+      if (kIsDebugBuild) {
+        // Crash only in debug ART builds.
+        LOG(FATAL) << "Had a lock reported for a dex pc "
+                      "but was not able to fetch a corresponding object!";
+      } else {
+        LOG(ERROR) << "Held monitor information in stack trace will be incomplete!";
+      }
     }
   }
 }

@@ -61,7 +61,9 @@ class ClassWithFinals {
   /// CHECK-NOT:  {{[slm]}}fence
   public ClassWithFinals() {
     // Exactly one constructor barrier.
-    x = 0;
+    // Note: Do not store 0 as that can be eliminated together with the constructor
+    // barrier by the code pattern substitution in the inliner.
+    x = 1;
   }
 
   /// CHECK-START: void ClassWithFinals.<init>(int) inliner (after)

@@ -72,8 +72,8 @@
 #include "exec_utils.h"
 #include "file_utils.h"
 #include "fstab/fstab.h"
-#include "oat_file_assistant.h"
-#include "oat_file_assistant_context.h"
+#include "oat/oat_file_assistant.h"
+#include "oat/oat_file_assistant_context.h"
 #include "path_utils.h"
 #include "profman/profman_result.h"
 #include "selinux/android.h"
@@ -87,6 +87,7 @@ namespace artd {
 namespace {
 
 using ::aidl::com::android::server::art::ArtdDexoptResult;
+using ::aidl::com::android::server::art::ArtifactsLocation;
 using ::aidl::com::android::server::art::ArtifactsPath;
 using ::aidl::com::android::server::art::CopyAndRewriteProfileResult;
 using ::aidl::com::android::server::art::DexMetadataPath;
@@ -119,10 +120,10 @@ using ::art::service::ValidateDexPath;
 using ::art::tools::CmdlineBuilder;
 using ::ndk::ScopedAStatus;
 
-using ArtifactsLocation = GetDexoptNeededResult::ArtifactsLocation;
 using TmpProfilePath = ProfilePath::TmpProfilePath;
 
 constexpr const char* kServiceName = "artd";
+constexpr const char* kPreRebootServiceName = "artd_pre_reboot";
 constexpr const char* kArtdCancellationSignalType = "ArtdCancellationSignal";
 
 // Timeout for short operations, such as merging profiles.
@@ -510,17 +511,24 @@ std::ostream& operator<<(std::ostream& os, const FdLogger& fd_logger) {
 
 }  // namespace
 
-#define OR_RETURN_ERROR(func, expr)         \
-  ({                                        \
-    decltype(expr)&& tmp = (expr);          \
-    if (!tmp.ok()) {                        \
-      return (func)(tmp.error().message()); \
-    }                                       \
-    std::move(tmp).value();                 \
+#define OR_RETURN_ERROR(func, expr)                           \
+  ({                                                          \
+    decltype(expr)&& __or_return_error_tmp = (expr);          \
+    if (!__or_return_error_tmp.ok()) {                        \
+      return (func)(__or_return_error_tmp.error().message()); \
+    }                                                         \
+    std::move(__or_return_error_tmp).value();                 \
   })
 
 #define OR_RETURN_FATAL(expr)     OR_RETURN_ERROR(Fatal, expr)
 #define OR_RETURN_NON_FATAL(expr) OR_RETURN_ERROR(NonFatal, expr)
+#define OR_LOG_AND_RETURN_OK(expr)     \
+  OR_RETURN_ERROR(                     \
+      [](const std::string& message) { \
+        LOG(ERROR) << message;         \
+        return ScopedAStatus::ok();    \
+      },                               \
+      expr)
 
 ScopedAStatus Artd::isAlive(bool* _aidl_return) {
   *_aidl_return = true;
@@ -562,10 +570,13 @@ ScopedAStatus Artd::getDexoptStatus(const std::string& in_dexFile,
   }
 
   std::string ignored_odex_status;
+  OatFileAssistant::Location location;
   oat_file_assistant->GetOptimizationStatus(&_aidl_return->locationDebugString,
                                             &_aidl_return->compilerFilter,
                                             &_aidl_return->compilationReason,
-                                            &ignored_odex_status);
+                                            &ignored_odex_status,
+                                            &location);
+  _aidl_return->artifactsLocation = ArtifactsLocationToAidl(location);
 
   // We ignore odex_status because it is not meaningful. It can only be either "up-to-date",
   // "apk-more-recent", or "io-error-no-oat", which means it doesn't give us information in addition
@@ -1278,8 +1289,9 @@ ScopedAStatus Artd::isInDalvikCache(const std::string& in_dexFile, bool* _aidl_r
 ScopedAStatus Artd::deleteRuntimeArtifacts(const RuntimeArtifactsPath& in_runtimeArtifactsPath,
                                            int64_t* _aidl_return) {
   OR_RETURN_FATAL(ValidateRuntimeArtifactsPath(in_runtimeArtifactsPath));
-  std::string android_data = OR_RETURN_NON_FATAL(GetAndroidDataOrError());
-  std::string android_expand = OR_RETURN_NON_FATAL(GetAndroidExpandOrError());
+  *_aidl_return = 0;
+  std::string android_data = OR_LOG_AND_RETURN_OK(GetAndroidDataOrError());
+  std::string android_expand = OR_LOG_AND_RETURN_OK(GetAndroidExpandOrError());
   for (const std::string& file :
        ListRuntimeArtifactsFiles(android_data, android_expand, in_runtimeArtifactsPath)) {
     *_aidl_return += GetSizeAndDeleteFile(file);
@@ -1287,12 +1299,46 @@ ScopedAStatus Artd::deleteRuntimeArtifacts(const RuntimeArtifactsPath& in_runtim
   return ScopedAStatus::ok();
 }
 
+ScopedAStatus Artd::getArtifactsSize(const ArtifactsPath& in_artifactsPath, int64_t* _aidl_return) {
+  std::string oat_path = OR_RETURN_FATAL(BuildOatPath(in_artifactsPath));
+  *_aidl_return = 0;
+  *_aidl_return += GetSize(oat_path).value_or(0);
+  *_aidl_return += GetSize(OatPathToVdexPath(oat_path)).value_or(0);
+  *_aidl_return += GetSize(OatPathToArtPath(oat_path)).value_or(0);
+  return ScopedAStatus::ok();
+}
+
+ScopedAStatus Artd::getVdexFileSize(const VdexPath& in_vdexPath, int64_t* _aidl_return) {
+  std::string vdex_path = OR_RETURN_FATAL(BuildVdexPath(in_vdexPath));
+  *_aidl_return = GetSize(vdex_path).value_or(0);
+  return ScopedAStatus::ok();
+}
+
+ScopedAStatus Artd::getRuntimeArtifactsSize(const RuntimeArtifactsPath& in_runtimeArtifactsPath,
+                                            int64_t* _aidl_return) {
+  OR_RETURN_FATAL(ValidateRuntimeArtifactsPath(in_runtimeArtifactsPath));
+  *_aidl_return = 0;
+  std::string android_data = OR_LOG_AND_RETURN_OK(GetAndroidDataOrError());
+  std::string android_expand = OR_LOG_AND_RETURN_OK(GetAndroidExpandOrError());
+  for (const std::string& file :
+       ListRuntimeArtifactsFiles(android_data, android_expand, in_runtimeArtifactsPath)) {
+    *_aidl_return += GetSize(file).value_or(0);
+  }
+  return ScopedAStatus::ok();
+}
+
+ScopedAStatus Artd::getProfileSize(const ProfilePath& in_profile, int64_t* _aidl_return) {
+  std::string profile_path = OR_RETURN_FATAL(BuildProfileOrDmPath(in_profile));
+  *_aidl_return = GetSize(profile_path).value_or(0);
+  return ScopedAStatus::ok();
+}
+
 Result<void> Artd::Start() {
   OR_RETURN(SetLogVerbosity());
   MemMap::Init();
 
-  ScopedAStatus status = ScopedAStatus::fromStatus(
-      AServiceManager_registerLazyService(this->asBinder().get(), kServiceName));
+  ScopedAStatus status = ScopedAStatus::fromStatus(AServiceManager_registerLazyService(
+      this->asBinder().get(), options_.is_pre_reboot ? kPreRebootServiceName : kServiceName));
   if (!status.isOk()) {
     return Error() << status.getDescription();
   }

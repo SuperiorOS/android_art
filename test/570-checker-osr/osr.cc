@@ -19,10 +19,10 @@
 #include "jit/jit_code_cache.h"
 #include "jit/profiling_info.h"
 #include "nativehelper/ScopedUtfChars.h"
-#include "oat_quick_method_header.h"
+#include "oat/oat_quick_method_header.h"
+#include "oat/stack_map.h"
 #include "scoped_thread_state_change-inl.h"
 #include "stack.h"
-#include "stack_map.h"
 #include "thread-current-inl.h"
 
 namespace art {
@@ -96,21 +96,6 @@ extern "C" JNIEXPORT jboolean JNICALL Java_Main_isInInterpreter(JNIEnv* env,
         }
       });
   return in_interpreter;
-}
-
-extern "C" JNIEXPORT void JNICALL Java_Main_ensureHasProfilingInfo(JNIEnv* env,
-                                                                   jclass,
-                                                                   jstring method_name) {
-  if (!Runtime::Current()->UseJitCompilation()) {
-    return;
-  }
-  ProcessMethodWithName(
-      env,
-      method_name,
-      [&](const art::StackVisitor* stack_visitor) REQUIRES_SHARED(Locks::mutator_lock_) {
-        ArtMethod* m = stack_visitor->GetMethod();
-        ProfilingInfo::Create(Thread::Current(), m);
-      });
 }
 
 extern "C" JNIEXPORT void JNICALL Java_Main_ensureHasOsrCode(JNIEnv* env,

@@ -35,7 +35,7 @@ void* GetLibHandle() {
 
 template <typename FuncPtr>
 FuncPtr GetFuncPtr(const char* function_name) {
-  auto f = reinterpret_cast<FuncPtr>(dlsym(GetLibHandle(), function_name));
+  FuncPtr f = reinterpret_cast<FuncPtr>(dlsym(GetLibHandle(), function_name));
   LOG_FATAL_IF(f == nullptr, "Failed to get address of %s: %s", function_name, dlerror());
   return f;
 }

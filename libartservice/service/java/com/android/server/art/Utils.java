@@ -24,8 +24,10 @@ import android.annotation.Nullable;
 import android.app.role.RoleManager;
 import android.apphibernation.AppHibernationManager;
 import android.content.Context;
+import android.os.Binder;
 import android.os.Build;
 import android.os.DeadObjectException;
+import android.os.Process;
 import android.os.RemoteException;
 import android.os.ServiceSpecificException;
 import android.os.SystemClock;
@@ -65,6 +67,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Future;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /** @hide */
@@ -220,17 +223,6 @@ public final class Utils {
         return DexFile.isValidCompilerFilter(compilerFilter);
     }
 
-    @NonNull
-    public static IArtd getArtd() {
-        IArtd artd = IArtd.Stub.asInterface(ArtModuleServiceInitializer.getArtModuleServiceManager()
-                                                    .getArtdServiceRegisterer()
-                                                    .waitForService());
-        if (artd == null) {
-            throw new IllegalStateException("Unable to connect to artd");
-        }
-        return artd;
-    }
-
     public static boolean implies(boolean cond1, boolean cond2) {
         return cond1 ? cond2 : true;
     }
@@ -272,6 +264,10 @@ public final class Utils {
 
     public static void executeAndWait(@NonNull Executor executor, @NonNull Runnable runnable) {
         getFuture(CompletableFuture.runAsync(runnable, executor));
+    }
+
+    public static <T> T executeAndWait(@NonNull Executor executor, @NonNull Supplier<T> supplier) {
+        return getFuture(CompletableFuture.supplyAsync(supplier, executor));
     }
 
     public static <T> T getFuture(Future<T> future) {
@@ -454,6 +450,11 @@ public final class Utils {
             // Not expected. Log wtf to surface it.
             Slog.wtf(TAG, message, e);
         }
+    }
+
+    public static boolean isSystemOrRootOrShell() {
+        int uid = Binder.getCallingUid();
+        return uid == Process.SYSTEM_UID || uid == Process.ROOT_UID || uid == Process.SHELL_UID;
     }
 
     @AutoValue

@@ -427,8 +427,8 @@ bool DexFile::DecodeDebugLocalInfo(uint32_t registers_size,
 
 template<typename DexDebugNewPosition, typename IndexToStringData>
 bool DexFile::DecodeDebugPositionInfo(const uint8_t* stream,
-                                      const IndexToStringData& index_to_string_data,
-                                      const DexDebugNewPosition& position_functor) {
+                                      IndexToStringData&& index_to_string_data,
+                                      DexDebugNewPosition&& position_functor) {
   if (stream == nullptr) {
     return false;
   }
@@ -514,7 +514,7 @@ inline IterationRange<ClassIterator> DexFile::GetClasses() const {
 // Returns the line number
 template <typename Visitor>
 inline uint32_t DexFile::DecodeDebugInfoParameterNames(const uint8_t** debug_info,
-                                                       const Visitor& visitor) {
+                                                       Visitor&& visitor) {
   uint32_t line = DecodeUnsignedLeb128(debug_info);
   const uint32_t parameters_size = DecodeUnsignedLeb128(debug_info);
   for (uint32_t i = 0; i < parameters_size; ++i) {

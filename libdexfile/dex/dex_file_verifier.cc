@@ -20,11 +20,11 @@
 #include <bitset>
 #include <limits>
 #include <memory>
+#include <stack>
 
 #include "android-base/logging.h"
 #include "android-base/macros.h"
 #include "android-base/stringprintf.h"
-
 #include "base/hash_map.h"
 #include "base/leb128.h"
 #include "base/safe_map.h"
@@ -255,14 +255,15 @@ class DexFileVerifier {
   bool CheckHeader();
   bool CheckMap();
 
-  uint32_t ReadUnsignedLittleEndian(uint32_t size) {
-    uint32_t result = 0;
-    if (LIKELY(CheckListSize(ptr_, size, sizeof(uint8_t), "encoded_value"))) {
-      for (uint32_t i = 0; i < size; i++) {
-        result |= ((uint32_t) *(ptr_++)) << (i * 8);
-      }
+  ALWAYS_INLINE bool ReadUnsignedLittleEndian(uint32_t size, /*out*/ uint32_t* result) {
+    if (!CheckListSize(ptr_, size, sizeof(uint8_t), "encoded_value")) {
+      return false;
     }
-    return result;
+    *result = 0;
+    for (uint32_t i = 0; i < size; i++) {
+      *result |= ((uint32_t) * (ptr_++)) << (i * 8);
+    }
+    return true;
   }
   bool CheckAndGetHandlerOffsets(const dex::CodeItem* code_item,
                                  uint32_t* handler_offsets, uint32_t handlers_size);
@@ -290,9 +291,21 @@ class DexFileVerifier {
   bool CheckStaticFieldTypes(const dex::ClassDef& class_def);
 
   bool CheckPadding(uint32_t aligned_offset, DexFile::MapItemType type);
+
+  // The encoded values, arrays and annotations are allowed to be very deeply nested,
+  // so use heap todo-list instead of stack recursion (the work is done in LIFO order).
+  struct ToDoItem {
+    uint32_t array_size = 0;          // CheckArrayElement.
+    uint32_t annotation_size = 0;     // CheckAnnotationElement.
+    uint32_t last_idx = kDexNoIndex;  // CheckAnnotationElement.
+  };
+  using ToDoList = std::stack<ToDoItem>;
   bool CheckEncodedValue();
   bool CheckEncodedArray();
+  bool CheckArrayElement();
   bool CheckEncodedAnnotation();
+  bool CheckAnnotationElement(/*inout*/ uint32_t* last_idx);
+  bool FlushToDoList();
 
   bool CheckIntraTypeIdItem();
   bool CheckIntraProtoIdItem();
@@ -453,6 +466,9 @@ class DexFileVerifier {
 
   // Class definition indexes, valid only if corresponding `defined_classes_[.]` is true.
   std::vector<uint16_t> defined_class_indexes_;
+
+  // Used by CheckEncodedValue to avoid recursion. Field so we can reuse allocated memory.
+  ToDoList todo_;
 };
 
 template <typename ExtraCheckFn>
@@ -1015,39 +1031,58 @@ bool DexFileVerifier::CheckEncodedValue() {
   uint32_t value_arg = header_byte >> DexFile::kDexAnnotationValueArgShift;
 
   switch (value_type) {
-    case DexFile::kDexAnnotationByte:
+    case DexFile::kDexAnnotationByte: {
       if (UNLIKELY(value_arg != 0)) {
         ErrorStringPrintf("Bad encoded_value byte size %x", value_arg);
         return false;
       }
-      ptr_++;
+      uint32_t value;
+      if (!ReadUnsignedLittleEndian(value_arg + 1, &value)) {
+        return false;
+      }
       break;
+    }
     case DexFile::kDexAnnotationShort:
-    case DexFile::kDexAnnotationChar:
+    case DexFile::kDexAnnotationChar: {
       if (UNLIKELY(value_arg > 1)) {
         ErrorStringPrintf("Bad encoded_value char/short size %x", value_arg);
         return false;
       }
-      ptr_ += value_arg + 1;
+      uint32_t value;
+      if (!ReadUnsignedLittleEndian(value_arg + 1, &value)) {
+        return false;
+      }
       break;
+    }
     case DexFile::kDexAnnotationInt:
-    case DexFile::kDexAnnotationFloat:
+    case DexFile::kDexAnnotationFloat: {
       if (UNLIKELY(value_arg > 3)) {
         ErrorStringPrintf("Bad encoded_value int/float size %x", value_arg);
         return false;
       }
-      ptr_ += value_arg + 1;
+      uint32_t value;
+      if (!ReadUnsignedLittleEndian(value_arg + 1, &value)) {
+        return false;
+      }
       break;
+    }
     case DexFile::kDexAnnotationLong:
-    case DexFile::kDexAnnotationDouble:
-      ptr_ += value_arg + 1;
+    case DexFile::kDexAnnotationDouble: {
+      uint32_t value;
+      if (!ReadUnsignedLittleEndian(value_arg + 1, &value)) {
+        return false;
+      }
       break;
+    }
     case DexFile::kDexAnnotationString: {
       if (UNLIKELY(value_arg > 3)) {
         ErrorStringPrintf("Bad encoded_value string size %x", value_arg);
         return false;
       }
-      uint32_t idx = ReadUnsignedLittleEndian(value_arg + 1);
+      uint32_t idx;
+      if (!ReadUnsignedLittleEndian(value_arg + 1, &idx)) {
+        return false;
+      }
       if (!CheckIndex(idx, header_->string_ids_size_, "encoded_value string")) {
         return false;
       }
@@ -1058,7 +1093,10 @@ bool DexFileVerifier::CheckEncodedValue() {
         ErrorStringPrintf("Bad encoded_value type size %x", value_arg);
         return false;
       }
-      uint32_t idx = ReadUnsignedLittleEndian(value_arg + 1);
+      uint32_t idx;
+      if (!ReadUnsignedLittleEndian(value_arg + 1, &idx)) {
+        return false;
+      }
       if (!CheckIndex(idx, header_->type_ids_size_, "encoded_value type")) {
         return false;
       }
@@ -1070,7 +1108,10 @@ bool DexFileVerifier::CheckEncodedValue() {
         ErrorStringPrintf("Bad encoded_value field/enum size %x", value_arg);
         return false;
       }
-      uint32_t idx = ReadUnsignedLittleEndian(value_arg + 1);
+      uint32_t idx;
+      if (!ReadUnsignedLittleEndian(value_arg + 1, &idx)) {
+        return false;
+      }
       if (!CheckIndex(idx, header_->field_ids_size_, "encoded_value field")) {
         return false;
       }
@@ -1081,7 +1122,10 @@ bool DexFileVerifier::CheckEncodedValue() {
         ErrorStringPrintf("Bad encoded_value method size %x", value_arg);
         return false;
       }
-      uint32_t idx = ReadUnsignedLittleEndian(value_arg + 1);
+      uint32_t idx;
+      if (!ReadUnsignedLittleEndian(value_arg + 1, &idx)) {
+        return false;
+      }
       if (!CheckIndex(idx, header_->method_ids_size_, "encoded_value method")) {
         return false;
       }
@@ -1122,7 +1166,10 @@ bool DexFileVerifier::CheckEncodedValue() {
         ErrorStringPrintf("Bad encoded_value method type size %x", value_arg);
         return false;
       }
-      uint32_t idx = ReadUnsignedLittleEndian(value_arg + 1);
+      uint32_t idx;
+      if (!ReadUnsignedLittleEndian(value_arg + 1, &idx)) {
+        return false;
+      }
       if (!CheckIndex(idx, header_->proto_ids_size_, "method_type value")) {
         return false;
       }
@@ -1133,7 +1180,10 @@ bool DexFileVerifier::CheckEncodedValue() {
         ErrorStringPrintf("Bad encoded_value method handle size %x", value_arg);
         return false;
       }
-      uint32_t idx = ReadUnsignedLittleEndian(value_arg + 1);
+      uint32_t idx;
+      if (!ReadUnsignedLittleEndian(value_arg + 1, &idx)) {
+        return false;
+      }
       if (!CheckIndex(idx, dex_file_->NumMethodHandles(), "method_handle value")) {
         return false;
       }
@@ -1149,12 +1199,15 @@ bool DexFileVerifier::CheckEncodedValue() {
 
 bool DexFileVerifier::CheckEncodedArray() {
   DECODE_UNSIGNED_CHECKED_FROM(ptr_, size);
+  todo_.emplace(ToDoItem{.array_size = size});
+  return true;
+}
 
-  for (; size != 0u; --size) {
-    if (!CheckEncodedValue()) {
-      failure_reason_ = StringPrintf("Bad encoded_array value: %s", failure_reason_.c_str());
-      return false;
-    }
+// Always called directly from FlushToDoList, which avoids recursion.
+bool DexFileVerifier::CheckArrayElement() {
+  if (!CheckEncodedValue()) {
+    failure_reason_ = StringPrintf("Bad encoded_array value: %s", failure_reason_.c_str());
+    return false;
   }
   return true;
 }
@@ -1166,25 +1219,44 @@ bool DexFileVerifier::CheckEncodedAnnotation() {
   }
 
   DECODE_UNSIGNED_CHECKED_FROM(ptr_, size);
-  uint32_t last_idx = 0;
+  todo_.emplace(ToDoItem{.annotation_size = size, .last_idx = kDexNoIndex});
+  return true;
+}
 
-  for (uint32_t i = 0; i < size; i++) {
-    DECODE_UNSIGNED_CHECKED_FROM(ptr_, idx);
-    if (!CheckIndex(idx, header_->string_ids_size_, "annotation_element name_idx")) {
-      return false;
+// Always called directly from FlushToDoList, which avoids recursion.
+bool DexFileVerifier::CheckAnnotationElement(/*inout*/ uint32_t* last_idx) {
+  DECODE_UNSIGNED_CHECKED_FROM(ptr_, idx);
+  if (!CheckIndex(idx, header_->string_ids_size_, "annotation_element name_idx")) {
+    return false;
+  }
+
+  if (UNLIKELY(*last_idx >= idx && *last_idx != kDexNoIndex)) {
+    ErrorStringPrintf("Out-of-order annotation_element name_idx: %x then %x", *last_idx, idx);
+    return false;
+  }
+  *last_idx = idx;
+
+  return CheckEncodedValue();
+}
+
+// Keep processing the rest of the to-do list until we are finished or encounter an error.
+bool DexFileVerifier::FlushToDoList() {
+  while (!todo_.empty()) {
+    ToDoItem& item = todo_.top();
+    DCHECK(item.array_size == 0u || item.annotation_size == 0u);
+    if (item.array_size > 0) {
+      item.array_size--;
+      if (!CheckArrayElement()) {
+        return false;
+      }
+    } else if (item.annotation_size > 0) {
+      item.annotation_size--;
+      if (!CheckAnnotationElement(&item.last_idx)) {
+        return false;
+      }
+    } else {
+      todo_.pop();
     }
-
-    if (UNLIKELY(last_idx >= idx && i != 0)) {
-      ErrorStringPrintf("Out-of-order annotation_element name_idx: %x then %x",
-                        last_idx, idx);
-      return false;
-    }
-
-    if (!CheckEncodedValue()) {
-      return false;
-    }
-
-    last_idx = idx;
   }
   return true;
 }
@@ -1704,13 +1776,16 @@ bool DexFileVerifier::CheckIntraStringDataItem() {
   DECODE_UNSIGNED_CHECKED_FROM(ptr_, size);
   const uint8_t* file_end = EndOfFile();
 
+  size_t available_bytes = static_cast<size_t>(file_end - ptr_);
+  if (available_bytes < size) {
+    ErrorStringPrintf("String data would go beyond end-of-file");
+    return false;
+  }
+  // Eagerly subtract one byte per character.
+  available_bytes -= size;
+
   for (uint32_t i = 0; i < size; i++) {
     CHECK_LT(i, size);  // b/15014252 Prevents hitting the impossible case below
-    if (UNLIKELY(ptr_ >= file_end)) {
-      ErrorStringPrintf("String data would go beyond end-of-file");
-      return false;
-    }
-
     uint8_t byte = *(ptr_++);
 
     // Switch on the high 4 bits.
@@ -1744,6 +1819,12 @@ bool DexFileVerifier::CheckIntraStringDataItem() {
       case 0x0c:
       case 0x0d: {
         // Bit pattern 110x has an additional byte.
+        if (available_bytes < 1u) {
+          ErrorStringPrintf("String data would go beyond end-of-file");
+          return false;
+        }
+        available_bytes -= 1u;
+
         uint8_t byte2 = *(ptr_++);
         if (UNLIKELY((byte2 & 0xc0) != 0x80)) {
           ErrorStringPrintf("Illegal continuation byte %x in string data", byte2);
@@ -1758,6 +1839,12 @@ bool DexFileVerifier::CheckIntraStringDataItem() {
       }
       case 0x0e: {
         // Bit pattern 1110 has 2 additional bytes.
+        if (available_bytes < 2u) {
+          ErrorStringPrintf("String data would go beyond end-of-file");
+          return false;
+        }
+        available_bytes -= 2u;
+
         uint8_t byte2 = *(ptr_++);
         if (UNLIKELY((byte2 & 0xc0) != 0x80)) {
           ErrorStringPrintf("Illegal continuation byte %x in string data", byte2);
@@ -1778,11 +1865,18 @@ bool DexFileVerifier::CheckIntraStringDataItem() {
     }
   }
 
+  if (available_bytes < 1u) {
+    ErrorStringPrintf("String data would go beyond end-of-file");
+    return false;
+  }
+  available_bytes -= 1u;
+
   if (UNLIKELY(*(ptr_++) != '\0')) {
     ErrorStringPrintf("String longer than indicated size %x", size);
     return false;
   }
 
+  DCHECK_EQ(available_bytes, static_cast<size_t>(file_end - ptr_));
   return true;
 }
 
@@ -1902,17 +1996,19 @@ bool DexFileVerifier::CheckIntraAnnotationItem() {
   }
 
   // Check visibility
-  switch (*(ptr_++)) {
+  uint8_t visibility = *(ptr_++);
+  switch (visibility) {
     case DexFile::kDexVisibilityBuild:
     case DexFile::kDexVisibilityRuntime:
     case DexFile::kDexVisibilitySystem:
       break;
     default:
-      ErrorStringPrintf("Bad annotation visibility: %x", *ptr_);
+      ErrorStringPrintf("Bad annotation visibility: %x", visibility);
       return false;
   }
 
-  if (!CheckEncodedAnnotation()) {
+  CHECK(todo_.empty());
+  if (!CheckEncodedAnnotation() || !FlushToDoList()) {
     return false;
   }
 
@@ -2164,7 +2260,8 @@ bool DexFileVerifier::CheckIntraSectionIterate(uint32_t section_count) {
         break;
       }
       case DexFile::kDexTypeEncodedArrayItem: {
-        if (!CheckEncodedArray()) {
+        CHECK(todo_.empty());
+        if (!CheckEncodedArray() || !FlushToDoList()) {
           return false;
         }
         break;
@@ -3407,6 +3504,7 @@ bool DexFileVerifier::Verify() {
     return false;
   }
 
+  CHECK(todo_.empty());  // No unprocessed work left over.
   return true;
 }
 

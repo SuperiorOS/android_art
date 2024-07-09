@@ -67,7 +67,7 @@ static std::unique_ptr<const std::vector<uint8_t>> CreateTrampoline(
 
       // VIXL will use the destination as a scratch register if
       // the offset is not encodable as an immediate operand.
-      ___ Ldr(temp_reg, MemOperand(r0, JNIEnvExt::SelfOffset(4).Int32Value()));
+      ___ Ldr(temp_reg, MemOperand(r0, JNIEnvExt::SelfOffset(kArmPointerSize).Int32Value()));
       ___ Ldr(pc, MemOperand(temp_reg, offset.Int32Value()));
       break;
     }
@@ -99,7 +99,7 @@ static std::unique_ptr<const std::vector<uint8_t>> CreateTrampoline(
     case kJniAbi:  // Load via Thread* held in JNIEnv* in first argument (X0).
       __ LoadRawPtr(Arm64ManagedRegister::FromXRegister(IP1),
                       Arm64ManagedRegister::FromXRegister(X0),
-                      Offset(JNIEnvExt::SelfOffset(8).Int32Value()));
+                      Offset(JNIEnvExt::SelfOffset(kArm64PointerSize).Int32Value()));
 
       __ JumpTo(Arm64ManagedRegister::FromXRegister(IP1), Offset(offset.Int32Value()),
                 Arm64ManagedRegister::FromXRegister(IP0));
@@ -134,9 +134,7 @@ static std::unique_ptr<const std::vector<uint8_t>> CreateTrampoline(ArenaAllocat
 
   switch (abi) {
     case kJniAbi:  // Load via Thread* held in JNIEnv* in first argument (A0).
-      __ Loadd(tmp,
-               A0,
-               JNIEnvExt::SelfOffset(static_cast<size_t>(kRiscv64PointerSize)).Int32Value());
+      __ Loadd(tmp, A0, JNIEnvExt::SelfOffset(kRiscv64PointerSize).Int32Value());
       __ Loadd(tmp, tmp, offset.Int32Value());
       __ Jr(tmp);
       break;

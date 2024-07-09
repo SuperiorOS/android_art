@@ -44,7 +44,6 @@ static void DoDeleteGlobalRef(JNIEnv* env, jobject o) {
   CHECK(thr != nullptr);
   if (env->IsInstanceOf(o, thr)) {
     jvmtiThreadInfo jti;
-    // b/146170834: This could cause DCHECK failures.
     CHECK_EQ(jvmti_env->GetThreadInfo(reinterpret_cast<jthread>(o), &jti), JVMTI_ERROR_NONE);
   }
   gOriginalEnv->DeleteGlobalRef(env, o);

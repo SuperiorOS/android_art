@@ -28,8 +28,9 @@
 #include "base/arena_allocator-inl.h"
 #include "base/mem_map.h"
 #include "base/systrace.h"
+#include "runtime_globals.h"
 
-namespace art {
+namespace art HIDDEN {
 
 class MemMapArena final : public Arena {
  public:

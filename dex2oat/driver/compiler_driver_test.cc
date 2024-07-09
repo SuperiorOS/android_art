@@ -261,7 +261,6 @@ class CompilerDriverProfileTest : public CompilerDriverTest {
 };
 
 TEST_F(CompilerDriverProfileTest, ProfileGuidedCompilation) {
-  TEST_DISABLED_FOR_RISCV64();
   Thread* self = Thread::Current();
   jobject class_loader;
   {

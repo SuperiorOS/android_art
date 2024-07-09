@@ -53,8 +53,9 @@
 #ifdef __cplusplus
 
 #include "base/globals.h"
+#include "base/macros.h"
 
-namespace art {
+namespace art HIDDEN {
 
 #ifdef USE_BAKER_READ_BARRIER
 static constexpr bool kUseBakerReadBarrier = true;
@@ -86,8 +87,8 @@ constexpr bool gUseUserfaultfd = true;
 constexpr bool gUseUserfaultfd = false;
 #endif
 #else
-extern const bool gUseReadBarrier;
-extern const bool gUseUserfaultfd;
+EXPORT extern const bool gUseReadBarrier;
+EXPORT extern const bool gUseUserfaultfd;
 #endif
 #endif
 

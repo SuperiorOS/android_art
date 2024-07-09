@@ -35,13 +35,13 @@
 #include "mirror/method.h"
 #include "mirror/object_array-alloc-inl.h"
 #include "mirror/object_array-inl.h"
-#include "oat_file.h"
+#include "oat/oat_file.h"
 #include "obj_ptr-inl.h"
 #include "reflection.h"
 #include "thread.h"
 #include "well_known_classes.h"
 
-namespace art {
+namespace art HIDDEN {
 
 using android::base::StringPrintf;
 

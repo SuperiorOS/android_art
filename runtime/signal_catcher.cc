@@ -46,7 +46,7 @@
 #include "thread.h"
 #include "thread_list.h"
 
-namespace art {
+namespace art HIDDEN {
 
 static void DumpCmdLine(std::ostream& os) {
 #if defined(__linux__)

@@ -23,7 +23,7 @@
 #include "mirror/method_type-inl.h"
 #include "mirror/var_handle.h"
 
-namespace art {
+namespace art HIDDEN {
 
 namespace {
 

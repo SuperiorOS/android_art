@@ -137,6 +137,10 @@ class JNIMacroAssembler : public DeletableArenaObject<kArenaAllocAssembler> {
                                             ManagedRegister base,
                                             MemberOffset offs);
 
+  // Load reference from a `StackReference<>`. The default is to load as `jint`. Some architectures
+  // (say, RISC-V) override this to provide a different sign- or zero-extension.
+  virtual void LoadStackReference(ManagedRegister dest, FrameOffset offs);
+
   // Copying routines
 
   // Move arguments from `srcs` locations to `dests` locations.
@@ -162,6 +166,17 @@ class JNIMacroAssembler : public DeletableArenaObject<kArenaAllocAssembler> {
   // Exploit fast access in managed code to Thread::Current()
   virtual void GetCurrentThread(ManagedRegister dest) = 0;
   virtual void GetCurrentThread(FrameOffset dest_offset) = 0;
+
+  // Manipulating local reference table states.
+  //
+  // These have a default implementation but they can be overridden to use register pair
+  // load/store instructions on architectures that support them (arm, arm64).
+  virtual void LoadLocalReferenceTableStates(ManagedRegister jni_env_reg,
+                                             ManagedRegister previous_state_reg,
+                                             ManagedRegister current_state_reg);
+  virtual void StoreLocalReferenceTableStates(ManagedRegister jni_env_reg,
+                                              ManagedRegister previous_state_reg,
+                                              ManagedRegister current_state_reg);
 
   // Decode JNI transition or local `jobject`. For (weak) global `jobject`, jump to slow path.
   virtual void DecodeJNITransitionOrLocalJObject(ManagedRegister reg,
@@ -246,7 +261,7 @@ class JNIMacroAssembler : public DeletableArenaObject<kArenaAllocAssembler> {
 //
 // It is only safe to use a label created
 // via JNIMacroAssembler::CreateLabel with that same macro assembler.
-class JNIMacroLabel {
+class JNIMacroLabel : public DeletableArenaObject<kArenaAllocAssembler> {
  public:
   virtual ~JNIMacroLabel() = 0;
 

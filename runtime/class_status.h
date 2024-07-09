@@ -20,15 +20,23 @@
 #include <iosfwd>
 #include <stdint.h>
 
-namespace art {
+#include "base/macros.h"
+
+namespace art HIDDEN {
 
 // Class Status
 //
-// kRetired: Class that's temporarily used till class linking time
-// has its (vtable) size figured out and has been cloned to one with the
-// right size which will be the one used later. The old one is retired and
-// will be gc'ed once all refs to the class point to the newly
-// cloned version.
+// kNotReady: Newly allocated Class object.
+// If a Class cannot be found in the class table by FindClass, ClassLinker
+// allocates a new one in the kNotReady state and calls LoadClass. Note
+// if ClassLinker does find a Class, it may not be kResolved and ClassLinker
+// will try to push it forward toward kResolved.
+//
+// kRetired: Class object that was temporarily used until class linking time
+// when it had its final size (including vtable size) figured out and had
+// been cloned to one with the right size which will be the one used later.
+// The old one is retired and will be gc'ed once all refs to the class point
+// to the newly cloned version.
 //
 // kErrorUnresolved, kErrorResolved: Class is erroneous. We need
 // to distinguish between classes that have been resolved and classes that
@@ -36,12 +44,6 @@ namespace art {
 // return a previously resolved class even if its subsequent initialization
 // failed. We also need this to decide whether to wrap a previous
 // initialization failure in ClassDefNotFound error or not.
-//
-// kNotReady: If a Class cannot be found in the class table by
-// FindClass, it allocates an new one with AllocClass in the
-// kNotReady and calls LoadClass. Note if it does find a
-// class, it may not be kResolved and it will try to push it
-// forward toward kResolved.
 //
 // kIdx: LoadClass populates with Class with information from
 // the DexFile, moving the status to kIdx, indicating that the
@@ -72,13 +74,40 @@ namespace art {
 // compilation, and the compiler will mark the class as resolved in the
 // image and/or oat file.
 //
-// kVerifiedNeedsAccessChecks: The verifier sets a class to
-// this state if it encounters access-checks only soft failure at compile
-// time. This happens when there are unresolved classes in other dex
-// files, and this status marks a class as verified but that will need to run
+// kVerifiedNeedsAccessChecks: The verifier sets a class to this state
+// if it encounters access-checks only soft failure at compile time.
+// This happens when there are unresolved classes in other dex files,
+// and this status marks a class as verified but that will need to run
 // with access checks enabled in the interpreter.
 //
-// TODO: Explain the other states
+// kVerified: The class has been verified.
+//
+// kSuperclassValidated: Types referenced by virtual method signatures have
+// been verified to match the types referenced by the virtual and interface
+// methods from superclass and interfaces that they override or implement.
+// TODO: This is similar to loading constraints in the RI but the check is too
+// weak to fully ensure type safety. For example, the `DelegateLastClassLoader`
+// can easily break the type safety if a class name is resolved differently in
+// the parent class loader.
+//
+// kInitializing: The class is being initialized by some thread. Other threads
+// trying to initialize the class shall be blocked until the initialization is
+// completed by the initializing thread.
+//
+// kInitialized: The class has been fully initialized. However, a thread that
+// needs to see its fields in their initialized state needs to check for this
+// state with an acquire load on the class status field to ensure correct
+// memory visibility.
+//
+// kVisiblyInitialized: The class has been initialized and the fields in their
+// initialized state are visible to all threads without additional memory
+// synchronization. A thread can use a relaxed load of the class status field
+// and, if it finds this state, it can safely use the class's static fields.
+// This is ensured by executing a checkpoint on all threads after the class
+// was initialized; this operation is batched due to the high checkpoint cost.
+// This state enables cheap class initialization checks in compiled managed
+// code (especially AOT-compiled; JITted code could be eventually re-JITted
+// without any checks at all) and the runtime.
 enum class ClassStatus : uint8_t {
   kNotReady = 0,  // Zero-initialized Class object starts in this state.
   kRetired = 1,  // Retired, should not be used. Use the newly cloned one instead.
@@ -99,7 +128,7 @@ enum class ClassStatus : uint8_t {
   kLast = kVisiblyInitialized
 };
 
-std::ostream& operator<<(std::ostream& os, ClassStatus rhs);
+EXPORT std::ostream& operator<<(std::ostream& os, ClassStatus rhs);
 
 }  // namespace art
 

@@ -38,6 +38,7 @@ enum class SdkVersion : uint32_t {
   kS     = 31u,
   kS_V2  = 32u,
   kT     = 33u,
+  kU     = 34u,
   kMax   = std::numeric_limits<uint32_t>::max(),
 };
 

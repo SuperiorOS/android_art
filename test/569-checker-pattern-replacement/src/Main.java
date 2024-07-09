@@ -15,6 +15,26 @@
  */
 
 public class Main {
+  static class ExpectedError extends Error {}
+
+  public static void localStaticNopAndThrow() {
+    // Pattern matching replaces the invoke even in a block that ends with a `throw`.
+    $inline$localStaticNop();
+    throw new ExpectedError();
+  }
+
+  public static void $inline$localStaticNop() {}
+
+  /// CHECK-START: void Main.staticNopNeverInline() inliner (before)
+  /// CHECK:                          InvokeStaticOrDirect
+
+  /// CHECK-START: void Main.staticNopNeverInline() inliner (after)
+  /// CHECK:                          InvokeStaticOrDirect
+
+  public static void staticNopNeverInline() {
+    Second.staticNopNeverInline(11);
+  }
+
   /// CHECK-START: void Main.staticNop() inliner (before)
   /// CHECK:                          InvokeStaticOrDirect
 
@@ -1177,6 +1197,8 @@ public class Main {
     // Replaced NOP pattern.
     staticNop();
     nop(s);
+    // Not replaced NOP pattern.
+    staticNopNeverInline();
     // Replaced "return arg" pattern.
     assertEquals("arbitrary string", staticReturnArg2("arbitrary string"));
     assertEquals(4321L, returnArg1(s, 4321L));
@@ -1259,6 +1281,11 @@ public class Main {
     assertEquals(123, constructDerivedInSecondDex(123));
     assertEquals(0, constructDerivedInSecondDexWith0());
     assertEquals(0, constructDerivedInSecondDex(7L));
+
+    try {
+      localStaticNopAndThrow();
+      throw new Error("Unreachable");
+    } catch (ExpectedError expected) {}
   }
 
   private static void assertEquals(int expected, int actual) {

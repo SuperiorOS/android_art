@@ -18,7 +18,6 @@
 
 #include <android-base/logging.h>
 
-#include "aot_class_linker.h"
 #include "base/mutex-inl.h"
 #include "base/stl_util.h"
 #include "dex/descriptors_names.h"
@@ -30,12 +29,13 @@
 #include "mirror/dex_cache-inl.h"
 #include "mirror/object-inl.h"
 #include "mirror/object_array-inl.h"
+#include "oat/aot_class_linker.h"
 #include "obj_ptr-inl.h"
 #include "runtime.h"
 
 #include <list>
 
-namespace art {
+namespace art HIDDEN {
 
 // TODO: remove (only used for debugging purpose).
 static constexpr bool kEnableTransactionStats = false;

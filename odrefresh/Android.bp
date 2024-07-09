@@ -41,10 +41,9 @@ cc_defaults {
         "art-odrefresh-operator-srcs",
     ],
     shared_libs: [
-        "libartpalette",
-        "libarttools", // Contains "libc++fs".
         "libbase",
         "liblog",
+        "libselinux",
     ],
     static_libs: [
         "libmodules-utils-build",
@@ -65,6 +64,7 @@ cc_defaults {
     ],
     srcs: ["odrefresh_main.cc"],
     shared_libs: [
+        "libarttools", // Contains "libc++fs".
         "libdexfile",
     ],
     target: {
@@ -168,7 +168,10 @@ cc_library_static {
                 "odr_metrics_record.cc",
                 "odr_statslog_android.cc",
             ],
-            shared_libs: ["libstatssocket"],
+            shared_libs: [
+                "libstatspull",
+                "libstatssocket",
+            ],
         },
         host: {
             srcs: ["odr_statslog_host.cc"],
@@ -207,6 +210,9 @@ art_cc_test {
         "art_odrefresh_tests_defaults",
     ],
     host_supported: false,
+    shared_libs: [
+        "libarttools",
+    ],
     // The test config template is needed even though it's not used by the test
     // runner. Otherwise, Soong will generate a test config, which is adding
     // `art-host-test` as a test tag, while this test does not support running
@@ -221,6 +227,9 @@ art_cc_test {
     defaults: [
         "art_standalone_gtest_defaults",
         "art_odrefresh_tests_defaults",
+    ],
+    static_libs: [
+        "libarttools",
     ],
 }
 

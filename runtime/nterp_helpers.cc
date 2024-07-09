@@ -20,10 +20,10 @@
 #include "entrypoints/quick/callee_save_frame.h"
 #include "interpreter/mterp/nterp.h"
 #include "nterp_helpers.h"
-#include "oat_quick_method_header.h"
+#include "oat/oat_quick_method_header.h"
 #include "quick/quick_method_frame_info.h"
 
-namespace art {
+namespace art HIDDEN {
 
 /**
  * An nterp frame follows the optimizing compiler's ABI conventions, with
@@ -234,174 +234,8 @@ bool CanMethodUseNterp(ArtMethod* method, InstructionSet isa) {
       method->IsProxyMethod()) {
     return false;
   }
-  if (isa == InstructionSet::kRiscv64) {
-    if (method->GetDexFile()->IsCompactDexFile()) {
-      return false;  // Riscv64 nterp does not support compact dex yet.
-    }
-    if (method->DexInstructionData().TriesSize() != 0u) {
-      return false;  // Riscv64 nterp does not support exception handling yet.
-    }
-    for (DexInstructionPcPair pair : method->DexInstructions()) {
-      // TODO(riscv64): Add support for more instructions.
-      // Remove the check when all instructions are supported.
-      // Cases are listed in opcode order (DEX_INSTRUCTION_LIST).
-      switch (pair->Opcode()) {
-        case Instruction::NOP:
-        case Instruction::MOVE:
-        case Instruction::MOVE_FROM16:
-        case Instruction::MOVE_16:
-        case Instruction::MOVE_WIDE:
-        case Instruction::MOVE_WIDE_FROM16:
-        case Instruction::MOVE_WIDE_16:
-        case Instruction::MOVE_OBJECT:
-        case Instruction::MOVE_OBJECT_FROM16:
-        case Instruction::MOVE_OBJECT_16:
-        case Instruction::MOVE_RESULT:
-        case Instruction::MOVE_RESULT_WIDE:
-        case Instruction::MOVE_RESULT_OBJECT:
-        case Instruction::MOVE_EXCEPTION:
-        case Instruction::RETURN_VOID:
-        case Instruction::RETURN:
-        case Instruction::RETURN_WIDE:
-        case Instruction::RETURN_OBJECT:
-        case Instruction::CONST_4:
-        case Instruction::CONST_16:
-        case Instruction::CONST:
-        case Instruction::CONST_HIGH16:
-        case Instruction::CONST_WIDE_16:
-        case Instruction::CONST_WIDE_32:
-        case Instruction::CONST_WIDE:
-        case Instruction::CONST_WIDE_HIGH16:
-        case Instruction::SPUT:
-        case Instruction::SPUT_WIDE:
-        case Instruction::SPUT_OBJECT:
-        case Instruction::SPUT_BOOLEAN:
-        case Instruction::SPUT_BYTE:
-        case Instruction::SPUT_CHAR:
-        case Instruction::SPUT_SHORT:
-        case Instruction::INVOKE_VIRTUAL:
-        case Instruction::INVOKE_SUPER:
-        case Instruction::INVOKE_DIRECT:
-        case Instruction::INVOKE_STATIC:
-        case Instruction::INVOKE_INTERFACE:
-        case Instruction::INVOKE_VIRTUAL_RANGE:
-        case Instruction::INVOKE_SUPER_RANGE:
-        case Instruction::INVOKE_DIRECT_RANGE:
-        case Instruction::INVOKE_STATIC_RANGE:
-        case Instruction::INVOKE_INTERFACE_RANGE:
-        case Instruction::NEG_INT:
-        case Instruction::NOT_INT:
-        case Instruction::NEG_LONG:
-        case Instruction::NOT_LONG:
-        case Instruction::NEG_FLOAT:
-        case Instruction::NEG_DOUBLE:
-        case Instruction::INT_TO_LONG:
-        case Instruction::INT_TO_FLOAT:
-        case Instruction::INT_TO_DOUBLE:
-        case Instruction::LONG_TO_INT:
-        case Instruction::LONG_TO_FLOAT:
-        case Instruction::LONG_TO_DOUBLE:
-        case Instruction::FLOAT_TO_INT:
-        case Instruction::FLOAT_TO_LONG:
-        case Instruction::FLOAT_TO_DOUBLE:
-        case Instruction::DOUBLE_TO_INT:
-        case Instruction::DOUBLE_TO_LONG:
-        case Instruction::DOUBLE_TO_FLOAT:
-        case Instruction::INT_TO_BYTE:
-        case Instruction::INT_TO_CHAR:
-        case Instruction::INT_TO_SHORT:
-        case Instruction::ADD_INT:
-        case Instruction::SUB_INT:
-        case Instruction::MUL_INT:
-        case Instruction::DIV_INT:
-        case Instruction::REM_INT:
-        case Instruction::AND_INT:
-        case Instruction::OR_INT:
-        case Instruction::XOR_INT:
-        case Instruction::SHL_INT:
-        case Instruction::SHR_INT:
-        case Instruction::USHR_INT:
-        case Instruction::ADD_LONG:
-        case Instruction::SUB_LONG:
-        case Instruction::MUL_LONG:
-        case Instruction::DIV_LONG:
-        case Instruction::REM_LONG:
-        case Instruction::AND_LONG:
-        case Instruction::OR_LONG:
-        case Instruction::XOR_LONG:
-        case Instruction::SHL_LONG:
-        case Instruction::SHR_LONG:
-        case Instruction::USHR_LONG:
-        case Instruction::ADD_FLOAT:
-        case Instruction::SUB_FLOAT:
-        case Instruction::MUL_FLOAT:
-        case Instruction::DIV_FLOAT:
-        case Instruction::REM_FLOAT:
-        case Instruction::ADD_DOUBLE:
-        case Instruction::SUB_DOUBLE:
-        case Instruction::MUL_DOUBLE:
-        case Instruction::DIV_DOUBLE:
-        case Instruction::REM_DOUBLE:
-        case Instruction::ADD_INT_2ADDR:
-        case Instruction::SUB_INT_2ADDR:
-        case Instruction::MUL_INT_2ADDR:
-        case Instruction::DIV_INT_2ADDR:
-        case Instruction::REM_INT_2ADDR:
-        case Instruction::AND_INT_2ADDR:
-        case Instruction::OR_INT_2ADDR:
-        case Instruction::XOR_INT_2ADDR:
-        case Instruction::SHL_INT_2ADDR:
-        case Instruction::SHR_INT_2ADDR:
-        case Instruction::USHR_INT_2ADDR:
-        case Instruction::ADD_LONG_2ADDR:
-        case Instruction::SUB_LONG_2ADDR:
-        case Instruction::MUL_LONG_2ADDR:
-        case Instruction::DIV_LONG_2ADDR:
-        case Instruction::REM_LONG_2ADDR:
-        case Instruction::AND_LONG_2ADDR:
-        case Instruction::OR_LONG_2ADDR:
-        case Instruction::XOR_LONG_2ADDR:
-        case Instruction::SHL_LONG_2ADDR:
-        case Instruction::SHR_LONG_2ADDR:
-        case Instruction::USHR_LONG_2ADDR:
-        case Instruction::ADD_FLOAT_2ADDR:
-        case Instruction::SUB_FLOAT_2ADDR:
-        case Instruction::MUL_FLOAT_2ADDR:
-        case Instruction::DIV_FLOAT_2ADDR:
-        case Instruction::REM_FLOAT_2ADDR:
-        case Instruction::ADD_DOUBLE_2ADDR:
-        case Instruction::SUB_DOUBLE_2ADDR:
-        case Instruction::MUL_DOUBLE_2ADDR:
-        case Instruction::DIV_DOUBLE_2ADDR:
-        case Instruction::REM_DOUBLE_2ADDR:
-        case Instruction::ADD_INT_LIT16:
-        case Instruction::RSUB_INT:
-        case Instruction::MUL_INT_LIT16:
-        case Instruction::DIV_INT_LIT16:
-        case Instruction::REM_INT_LIT16:
-        case Instruction::AND_INT_LIT16:
-        case Instruction::OR_INT_LIT16:
-        case Instruction::XOR_INT_LIT16:
-        case Instruction::ADD_INT_LIT8:
-        case Instruction::RSUB_INT_LIT8:
-        case Instruction::MUL_INT_LIT8:
-        case Instruction::DIV_INT_LIT8:
-        case Instruction::REM_INT_LIT8:
-        case Instruction::AND_INT_LIT8:
-        case Instruction::OR_INT_LIT8:
-        case Instruction::XOR_INT_LIT8:
-        case Instruction::SHL_INT_LIT8:
-        case Instruction::SHR_INT_LIT8:
-        case Instruction::USHR_INT_LIT8:
-        case Instruction::INVOKE_POLYMORPHIC:
-        case Instruction::INVOKE_POLYMORPHIC_RANGE:
-        case Instruction::INVOKE_CUSTOM:
-        case Instruction::INVOKE_CUSTOM_RANGE:
-          continue;
-        default:
-          return false;
-      }
-    }
+  if (isa == InstructionSet::kRiscv64 && method->GetDexFile()->IsCompactDexFile()) {
+    return false;  // Riscv64 nterp does not support compact dex yet.
   }
   // There is no need to add the alignment padding size for comparison with aligned limit.
   size_t frame_size_without_padding = NterpGetFrameSizeWithoutPadding(method, isa);

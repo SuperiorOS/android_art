@@ -43,7 +43,7 @@
 #include "scoped_thread_state_change.h"
 #include "thread-current-inl.h"
 
-namespace art {
+namespace art HIDDEN {
 
 jclass WellKnownClasses::dalvik_annotation_optimization_CriticalNative;
 jclass WellKnownClasses::dalvik_annotation_optimization_FastNative;

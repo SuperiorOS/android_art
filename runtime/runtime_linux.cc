@@ -23,7 +23,7 @@
 #include "base/memory_tool.h"
 #include "runtime_common.h"
 
-namespace art {
+namespace art HIDDEN {
 
 void HandleUnexpectedSignalLinux(int signal_number, siginfo_t* info, void* raw_context) {
   // Linux is mainly used for host testing. Under those conditions, react to the timeout signal,

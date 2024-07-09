@@ -6,6 +6,7 @@ package com.android.server.art {
     ctor public ArtManagerLocal(@NonNull android.content.Context);
     method public void addDexoptDoneCallback(boolean, @NonNull java.util.concurrent.Executor, @NonNull com.android.server.art.ArtManagerLocal.DexoptDoneCallback);
     method public void cancelBackgroundDexoptJob();
+    method public void clearAdjustCompilerFilterCallback();
     method @NonNull public void clearAppProfiles(@NonNull com.android.server.pm.PackageManagerLocal.FilteredSnapshot, @NonNull String);
     method public void clearBatchDexoptStartCallback();
     method public void clearScheduleBackgroundDexoptJobCallback();
@@ -14,19 +15,26 @@ package com.android.server.art {
     method @NonNull public com.android.server.art.model.DexoptResult dexoptPackage(@NonNull com.android.server.pm.PackageManagerLocal.FilteredSnapshot, @NonNull String, @NonNull com.android.server.art.model.DexoptParams, @NonNull android.os.CancellationSignal);
     method public void dump(@NonNull java.io.PrintWriter, @NonNull com.android.server.pm.PackageManagerLocal.FilteredSnapshot);
     method public void dumpPackage(@NonNull java.io.PrintWriter, @NonNull com.android.server.pm.PackageManagerLocal.FilteredSnapshot, @NonNull String);
+    method @NonNull public com.android.server.art.model.ArtManagedFileStats getArtManagedFileStats(@NonNull com.android.server.pm.PackageManagerLocal.FilteredSnapshot, @NonNull String);
     method @NonNull public com.android.server.art.model.DexoptStatus getDexoptStatus(@NonNull com.android.server.pm.PackageManagerLocal.FilteredSnapshot, @NonNull String);
     method @NonNull public com.android.server.art.model.DexoptStatus getDexoptStatus(@NonNull com.android.server.pm.PackageManagerLocal.FilteredSnapshot, @NonNull String, int);
     method public int handleShellCommand(@NonNull android.os.Binder, @NonNull android.os.ParcelFileDescriptor, @NonNull android.os.ParcelFileDescriptor, @NonNull android.os.ParcelFileDescriptor, @NonNull String[]);
+    method public void onApexStaged(@NonNull String[]);
     method public void onBoot(@NonNull String, @Nullable java.util.concurrent.Executor, @Nullable java.util.function.Consumer<com.android.server.art.model.OperationProgress>);
     method public void printShellCommandHelp(@NonNull java.io.PrintWriter);
     method public void removeDexoptDoneCallback(@NonNull com.android.server.art.ArtManagerLocal.DexoptDoneCallback);
     method public int scheduleBackgroundDexoptJob();
+    method public void setAdjustCompilerFilterCallback(@NonNull java.util.concurrent.Executor, @NonNull com.android.server.art.ArtManagerLocal.AdjustCompilerFilterCallback);
     method public void setBatchDexoptStartCallback(@NonNull java.util.concurrent.Executor, @NonNull com.android.server.art.ArtManagerLocal.BatchDexoptStartCallback);
     method public void setScheduleBackgroundDexoptJobCallback(@NonNull java.util.concurrent.Executor, @NonNull com.android.server.art.ArtManagerLocal.ScheduleBackgroundDexoptJobCallback);
     method @NonNull public android.os.ParcelFileDescriptor snapshotAppProfile(@NonNull com.android.server.pm.PackageManagerLocal.FilteredSnapshot, @NonNull String, @Nullable String) throws com.android.server.art.ArtManagerLocal.SnapshotProfileException;
     method @NonNull public android.os.ParcelFileDescriptor snapshotBootImageProfile(@NonNull com.android.server.pm.PackageManagerLocal.FilteredSnapshot) throws com.android.server.art.ArtManagerLocal.SnapshotProfileException;
     method public void startBackgroundDexoptJob();
     method public void unscheduleBackgroundDexoptJob();
+  }
+
+  public static interface ArtManagerLocal.AdjustCompilerFilterCallback {
+    method @NonNull public String onAdjustCompilerFilter(@NonNull String, @NonNull String, @NonNull String);
   }
 
   public static interface ArtManagerLocal.BatchDexoptStartCallback {
@@ -91,6 +99,13 @@ package com.android.server.art.model {
     field public static final int SCHEDULE_DISABLED_BY_SYSPROP = 2; // 0x2
     field public static final int SCHEDULE_JOB_SCHEDULER_FAILURE = 1; // 0x1
     field public static final int SCHEDULE_SUCCESS = 0; // 0x0
+  }
+
+  public class ArtManagedFileStats {
+    method public long getTotalSizeBytesByType(int);
+    field public static final int TYPE_CUR_PROFILE = 2; // 0x2
+    field public static final int TYPE_DEXOPT_ARTIFACT = 0; // 0x0
+    field public static final int TYPE_REF_PROFILE = 1; // 0x1
   }
 
   public abstract class BatchDexoptParams {

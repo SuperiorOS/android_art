@@ -79,6 +79,7 @@ struct Options {
   bool drop_capabilities = false;
   std::unordered_set<int> keep_fds{fileno(stdin), fileno(stdout), fileno(stderr)};
   std::unordered_map<std::string, std::string> envs;
+  std::string chroot;
 };
 
 [[noreturn]] void Usage(const std::string& error_msg) {
@@ -122,6 +123,8 @@ Options ParseOptions(int argc, char** argv) {
       }
       options.envs[std::string(arg.substr(/*pos=*/0, /*n=*/pos))] =
           std::string(arg.substr(pos + 1));
+    } else if (ConsumePrefix(&arg, "--chroot=")) {
+      options.chroot = arg;
     } else if (arg == "--") {
       if (i + 1 >= argc) {
         Usage("Missing command after '--'");
@@ -212,6 +215,13 @@ int main(int argc, char** argv) {
 
   for (const auto& [key, value] : options.envs) {
     setenv(key.c_str(), value.c_str(), /*overwrite=*/1);
+  }
+
+  if (!options.chroot.empty()) {
+    if (chroot(options.chroot.c_str()) != 0) {
+      PLOG(ERROR) << ART_FORMAT("Failed to chroot to '{}'", options.chroot);
+      return kErrorOther;
+    }
   }
 
   execv(argv[options.command_pos], argv + options.command_pos);

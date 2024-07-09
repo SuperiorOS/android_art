@@ -492,7 +492,9 @@ PRIVATE_I18N_APEX_DEPENDENCY_LIBS := \
   lib64/libicuuc.so \
 
 PRIVATE_STATSD_APEX_DEPENDENCY_LIBS := \
+  lib/libstatspull.so \
   lib/libstatssocket.so \
+  lib64/libstatspull.so \
   lib64/libstatssocket.so \
 
 # Extracts files from an APEX into a location. The APEX can be either a .apex or

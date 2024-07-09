@@ -24,7 +24,7 @@
 #include "obj_ptr-inl.h"
 #include "runtime.h"
 
-namespace art {
+namespace art HIDDEN {
 
 template <WriteBarrier::NullCheck kNullCheck>
 inline void WriteBarrier::ForFieldWrite(ObjPtr<mirror::Object> dst,

@@ -30,7 +30,7 @@ class OptimizingCompilerStats;
  * For example it changes uses of null checks and bounds checks to the original
  * objects, to avoid creating a live range for these checks.
  */
-class PrepareForRegisterAllocation : public HGraphDelegateVisitor {
+class PrepareForRegisterAllocation final : public HGraphDelegateVisitor {
  public:
   PrepareForRegisterAllocation(HGraph* graph,
                                const CompilerOptions& compiler_options,

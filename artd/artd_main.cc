@@ -22,10 +22,39 @@
 #include "android/binder_process.h"
 #include "artd.h"
 
+namespace art {
+namespace artd {
+namespace {
+
+constexpr int kErrorUsage = 100;
+
+[[noreturn]] void ParseError(const std::string& error_msg) {
+  LOG(ERROR) << error_msg;
+  std::cerr << error_msg << "\n";
+  exit(kErrorUsage);
+}
+
+Options ParseOptions(int argc, char** argv) {
+  Options options;
+  for (int i = 1; i < argc; i++) {
+    std::string_view arg = argv[i];
+    if (arg == "--pre-reboot") {
+      options.is_pre_reboot = true;
+    } else {
+      ParseError("Unknown option " + std::string(arg));
+    }
+  }
+  return options;
+}
+
+}  // namespace
+}  // namespace artd
+}  // namespace art
+
 int main([[maybe_unused]] int argc, char* argv[]) {
   android::base::InitLogging(argv);
 
-  auto artd = ndk::SharedRefBase::make<art::artd::Artd>();
+  auto artd = ndk::SharedRefBase::make<art::artd::Artd>(art::artd::ParseOptions(argc, argv));
 
   LOG(INFO) << "Starting artd";
 

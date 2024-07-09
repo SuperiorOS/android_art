@@ -19,7 +19,9 @@
 
 #include "class_linker.h"
 
-namespace art {
+#include "base/macros.h"
+
+namespace art HIDDEN {
 
 // Utility class to disabled the public sdk checker within a scope (if installed).
 class ScopedDisablePublicSdkChecker : public ValueObject {

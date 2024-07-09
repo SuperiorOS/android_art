@@ -55,7 +55,6 @@ void LinearizeTest::TestCode(const std::vector<uint16_t>& data,
 }
 
 TEST_F(LinearizeTest, CFG1) {
-  TEST_DISABLED_FOR_RISCV64();
   // Structure of this graph (+ are back edges)
   //            Block0
   //              |
@@ -81,7 +80,6 @@ TEST_F(LinearizeTest, CFG1) {
 }
 
 TEST_F(LinearizeTest, CFG2) {
-  TEST_DISABLED_FOR_RISCV64();
   // Structure of this graph (+ are back edges)
   //            Block0
   //              |
@@ -107,7 +105,6 @@ TEST_F(LinearizeTest, CFG2) {
 }
 
 TEST_F(LinearizeTest, CFG3) {
-  TEST_DISABLED_FOR_RISCV64();
   // Structure of this graph (+ are back edges)
   //            Block0
   //              |
@@ -135,7 +132,6 @@ TEST_F(LinearizeTest, CFG3) {
 }
 
 TEST_F(LinearizeTest, CFG4) {
-  TEST_DISABLED_FOR_RISCV64();
   /* Structure of this graph (+ are back edges)
   //            Block0
   //              |
@@ -166,7 +162,6 @@ TEST_F(LinearizeTest, CFG4) {
 }
 
 TEST_F(LinearizeTest, CFG5) {
-  TEST_DISABLED_FOR_RISCV64();
   /* Structure of this graph (+ are back edges)
   //            Block0
   //              |
@@ -197,7 +192,6 @@ TEST_F(LinearizeTest, CFG5) {
 }
 
 TEST_F(LinearizeTest, CFG6) {
-  TEST_DISABLED_FOR_RISCV64();
   //            Block0
   //              |
   //            Block1
@@ -224,7 +218,6 @@ TEST_F(LinearizeTest, CFG6) {
 }
 
 TEST_F(LinearizeTest, CFG7) {
-  TEST_DISABLED_FOR_RISCV64();
   // Structure of this graph (+ are back edges)
   //            Block0
   //              |

@@ -78,7 +78,7 @@ std::string vndk_version_str(bool use_product_vndk) {
 // insert vndk version in every {} placeholder
 void InsertVndkVersionStr(std::string* file_name, bool use_product_vndk) {
   CHECK(file_name != nullptr);
-  auto version = vndk_version_str(use_product_vndk);
+  const std::string version = vndk_version_str(use_product_vndk);
   size_t pos = file_name->find("{}");
   while (pos != std::string::npos) {
     file_name->replace(pos, 2, version);
@@ -94,7 +94,7 @@ Result<std::vector<std::string>> ReadConfig(
     const std::function<Result<bool>(const ConfigEntry& /* entry */)>& filter_fn) {
   std::string file_content;
   if (!base::ReadFileToString(configFile, &file_content)) {
-    return ErrnoError();
+    return ErrnoError() << "Failed to read " << configFile;
   }
   Result<std::vector<std::string>> result = ParseConfig(file_content, filter_fn);
   if (!result.ok()) {
@@ -123,7 +123,7 @@ void ReadExtensionLibraries(const char* dirname, std::vector<std::string>* sonam
             "Error extracting company name from public native library list file path \"%s\"",
             config_file_path.c_str());
 
-        auto ret = ReadConfig(
+        Result<std::vector<std::string>> ret = ReadConfig(
             config_file_path, [&company_name](const struct ConfigEntry& entry) -> Result<bool> {
               if (android::base::StartsWith(entry.soname, "lib") &&
                   android::base::EndsWith(entry.soname, "." + company_name + ".so")) {
@@ -139,8 +139,8 @@ void ReadExtensionLibraries(const char* dirname, std::vector<std::string>* sonam
         if (ret.ok()) {
           sonames->insert(sonames->end(), ret->begin(), ret->end());
         } else {
-          LOG_ALWAYS_FATAL("Error reading public native library list from \"%s\": %s",
-                           config_file_path.c_str(), ret.error().message().c_str());
+          LOG_ALWAYS_FATAL("Error reading extension library list: %s",
+                           ret.error().message().c_str());
         }
       }
     }
@@ -149,7 +149,7 @@ void ReadExtensionLibraries(const char* dirname, std::vector<std::string>* sonam
 
 static std::string InitDefaultPublicLibraries(bool for_preload) {
   std::string config_file = root_dir() + kDefaultPublicLibrariesFile;
-  auto sonames =
+  Result<std::vector<std::string>> sonames =
       ReadConfig(config_file, [&for_preload](const struct ConfigEntry& entry) -> Result<bool> {
         if (for_preload) {
           return !entry.nopreload;
@@ -158,8 +158,7 @@ static std::string InitDefaultPublicLibraries(bool for_preload) {
         }
       });
   if (!sonames.ok()) {
-    LOG_ALWAYS_FATAL("Error reading public native library list from \"%s\": %s",
-                     config_file.c_str(), sonames.error().message().c_str());
+    LOG_ALWAYS_FATAL("%s", sonames.error().message().c_str());
     return "";
   }
 
@@ -167,8 +166,8 @@ static std::string InitDefaultPublicLibraries(bool for_preload) {
   if (!for_preload) {
     // Remove the public libs provided by apexes because these libs are available
     // from apex namespaces.
-    for (const auto& p : apex_public_libraries()) {
-      auto public_libs = base::Split(p.second, ":");
+    for (const std::pair<std::string, std::string>& p : apex_public_libraries()) {
+      std::vector<std::string> public_libs = base::Split(p.second, ":");
       sonames->erase(std::remove_if(sonames->begin(),
                                     sonames->end(),
                                     [&public_libs](const std::string& v) {
@@ -186,7 +185,7 @@ static std::string InitDefaultPublicLibraries(bool for_preload) {
 
 static std::string InitVendorPublicLibraries() {
   // This file is optional, quietly ignore if the file does not exist.
-  auto sonames = ReadConfig(kVendorPublicLibrariesFile, always_true);
+  Result<std::vector<std::string>> sonames = ReadConfig(kVendorPublicLibrariesFile, always_true);
   if (!sonames.ok()) {
     ALOGI("InitVendorPublicLibraries skipped: %s", sonames.error().message().c_str());
     return "";
@@ -250,9 +249,9 @@ static std::string InitLlndkLibrariesVendor() {
   } else {
     config_file = kLlndkLibrariesNoVndkFile;
   }
-  auto sonames = ReadConfig(config_file, always_true);
+  Result<std::vector<std::string>> sonames = ReadConfig(config_file, always_true);
   if (!sonames.ok()) {
-    LOG_ALWAYS_FATAL("%s: %s", config_file.c_str(), sonames.error().message().c_str());
+    LOG_ALWAYS_FATAL("%s", sonames.error().message().c_str());
     return "";
   }
   std::string libs = android::base::Join(*sonames, ':');
@@ -272,9 +271,9 @@ static std::string InitLlndkLibrariesProduct() {
   } else {
     config_file = kLlndkLibrariesNoVndkFile;
   }
-  auto sonames = ReadConfig(config_file, always_true);
+  Result<std::vector<std::string>> sonames = ReadConfig(config_file, always_true);
   if (!sonames.ok()) {
-    LOG_ALWAYS_FATAL("%s: %s", config_file.c_str(), sonames.error().message().c_str());
+    LOG_ALWAYS_FATAL("%s", sonames.error().message().c_str());
     return "";
   }
   std::string libs = android::base::Join(*sonames, ':');
@@ -290,7 +289,7 @@ static std::string InitVndkspLibrariesVendor() {
 
   std::string config_file = kVndkLibrariesFile;
   InsertVndkVersionStr(&config_file, false);
-  auto sonames = ReadConfig(config_file, always_true);
+  Result<std::vector<std::string>> sonames = ReadConfig(config_file, always_true);
   if (!sonames.ok()) {
     LOG_ALWAYS_FATAL("%s", sonames.error().message().c_str());
     return "";
@@ -307,7 +306,7 @@ static std::string InitVndkspLibrariesProduct() {
   }
   std::string config_file = kVndkLibrariesFile;
   InsertVndkVersionStr(&config_file, true);
-  auto sonames = ReadConfig(config_file, always_true);
+  Result<std::vector<std::string>> sonames = ReadConfig(config_file, always_true);
   if (!sonames.ok()) {
     LOG_ALWAYS_FATAL("%s", sonames.error().message().c_str());
     return "";
@@ -460,8 +459,8 @@ Result<std::vector<std::string>> ParseConfig(
   std::vector<std::string> lines = base::Split(file_content, "\n");
 
   std::vector<std::string> sonames;
-  for (auto& line : lines) {
-    auto trimmed_line = base::Trim(line);
+  for (std::string& line : lines) {
+    std::string trimmed_line = base::Trim(line);
     if (trimmed_line[0] == '#' || trimmed_line.empty()) {
       continue;
     }
@@ -528,12 +527,12 @@ Result<std::vector<std::string>> ParseConfig(
 Result<std::map<std::string, std::string>> ParseApexLibrariesConfig(const std::string& file_content, const std::string& tag) {
   std::map<std::string, std::string> entries;
   std::vector<std::string> lines = base::Split(file_content, "\n");
-  for (auto& line : lines) {
-    auto trimmed_line = base::Trim(line);
+  for (std::string& line : lines) {
+    std::string trimmed_line = base::Trim(line);
     if (trimmed_line[0] == '#' || trimmed_line.empty()) {
       continue;
     }
-    auto config_line = ParseApexLibrariesConfigLine(trimmed_line);
+    Result<ApexLibrariesConfigLine> config_line = ParseApexLibrariesConfigLine(trimmed_line);
     if (!config_line.ok()) {
       return config_line.error();
     }

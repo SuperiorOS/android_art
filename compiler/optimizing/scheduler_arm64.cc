@@ -23,6 +23,115 @@
 namespace art HIDDEN {
 namespace arm64 {
 
+static constexpr uint32_t kArm64MemoryLoadLatency = 5;
+static constexpr uint32_t kArm64MemoryStoreLatency = 3;
+
+static constexpr uint32_t kArm64CallInternalLatency = 10;
+static constexpr uint32_t kArm64CallLatency = 5;
+
+// AArch64 instruction latency.
+// We currently assume that all arm64 CPUs share the same instruction latency list.
+static constexpr uint32_t kArm64IntegerOpLatency = 2;
+static constexpr uint32_t kArm64FloatingPointOpLatency = 5;
+
+static constexpr uint32_t kArm64DataProcWithShifterOpLatency = 3;
+static constexpr uint32_t kArm64DivDoubleLatency = 30;
+static constexpr uint32_t kArm64DivFloatLatency = 15;
+static constexpr uint32_t kArm64DivIntegerLatency = 5;
+static constexpr uint32_t kArm64LoadStringInternalLatency = 7;
+static constexpr uint32_t kArm64MulFloatingPointLatency = 6;
+static constexpr uint32_t kArm64MulIntegerLatency = 6;
+static constexpr uint32_t kArm64TypeConversionFloatingPointIntegerLatency = 5;
+static constexpr uint32_t kArm64BranchLatency = kArm64IntegerOpLatency;
+
+static constexpr uint32_t kArm64SIMDFloatingPointOpLatency = 10;
+static constexpr uint32_t kArm64SIMDIntegerOpLatency = 6;
+static constexpr uint32_t kArm64SIMDMemoryLoadLatency = 10;
+static constexpr uint32_t kArm64SIMDMemoryStoreLatency = 6;
+static constexpr uint32_t kArm64SIMDMulFloatingPointLatency = 12;
+static constexpr uint32_t kArm64SIMDMulIntegerLatency = 12;
+static constexpr uint32_t kArm64SIMDReplicateOpLatency = 16;
+static constexpr uint32_t kArm64SIMDDivDoubleLatency = 60;
+static constexpr uint32_t kArm64SIMDDivFloatLatency = 30;
+static constexpr uint32_t kArm64SIMDTypeConversionInt2FPLatency = 10;
+
+class SchedulingLatencyVisitorARM64 final : public SchedulingLatencyVisitor {
+ public:
+  // Default visitor for instructions not handled specifically below.
+  void VisitInstruction([[maybe_unused]] HInstruction*) override {
+    last_visited_latency_ = kArm64IntegerOpLatency;
+  }
+
+// We add a second unused parameter to be able to use this macro like the others
+// defined in `nodes.h`.
+#define FOR_EACH_SCHEDULED_COMMON_INSTRUCTION(M)     \
+  M(ArrayGet             , unused)                   \
+  M(ArrayLength          , unused)                   \
+  M(ArraySet             , unused)                   \
+  M(BoundsCheck          , unused)                   \
+  M(Div                  , unused)                   \
+  M(InstanceFieldGet     , unused)                   \
+  M(InstanceOf           , unused)                   \
+  M(LoadString           , unused)                   \
+  M(Mul                  , unused)                   \
+  M(NewArray             , unused)                   \
+  M(NewInstance          , unused)                   \
+  M(Rem                  , unused)                   \
+  M(StaticFieldGet       , unused)                   \
+  M(SuspendCheck         , unused)                   \
+  M(TypeConversion       , unused)                   \
+  M(VecReplicateScalar   , unused)                   \
+  M(VecExtractScalar     , unused)                   \
+  M(VecReduce            , unused)                   \
+  M(VecCnv               , unused)                   \
+  M(VecNeg               , unused)                   \
+  M(VecAbs               , unused)                   \
+  M(VecNot               , unused)                   \
+  M(VecAdd               , unused)                   \
+  M(VecHalvingAdd        , unused)                   \
+  M(VecSub               , unused)                   \
+  M(VecMul               , unused)                   \
+  M(VecDiv               , unused)                   \
+  M(VecMin               , unused)                   \
+  M(VecMax               , unused)                   \
+  M(VecAnd               , unused)                   \
+  M(VecAndNot            , unused)                   \
+  M(VecOr                , unused)                   \
+  M(VecXor               , unused)                   \
+  M(VecShl               , unused)                   \
+  M(VecShr               , unused)                   \
+  M(VecUShr              , unused)                   \
+  M(VecSetScalars        , unused)                   \
+  M(VecMultiplyAccumulate, unused)                   \
+  M(VecLoad              , unused)                   \
+  M(VecStore             , unused)
+
+#define FOR_EACH_SCHEDULED_ABSTRACT_INSTRUCTION(M)   \
+  M(BinaryOperation      , unused)                   \
+  M(Invoke               , unused)
+
+#define FOR_EACH_SCHEDULED_SHARED_INSTRUCTION(M) \
+  M(BitwiseNegatedRight, unused)                 \
+  M(MultiplyAccumulate, unused)                  \
+  M(IntermediateAddress, unused)                 \
+  M(IntermediateAddressIndex, unused)            \
+  M(DataProcWithShifterOp, unused)
+
+#define DECLARE_VISIT_INSTRUCTION(type, unused)  \
+  void Visit##type(H##type* instruction) override;
+
+  FOR_EACH_SCHEDULED_COMMON_INSTRUCTION(DECLARE_VISIT_INSTRUCTION)
+  FOR_EACH_SCHEDULED_ABSTRACT_INSTRUCTION(DECLARE_VISIT_INSTRUCTION)
+  FOR_EACH_SCHEDULED_SHARED_INSTRUCTION(DECLARE_VISIT_INSTRUCTION)
+  FOR_EACH_CONCRETE_INSTRUCTION_ARM64(DECLARE_VISIT_INSTRUCTION)
+
+#undef DECLARE_VISIT_INSTRUCTION
+
+ private:
+  void HandleSimpleArithmeticSIMD(HVecOperation *instr);
+  void HandleVecAddress(HVecMemoryOperation* instruction, size_t size);
+};
+
 void SchedulingLatencyVisitorARM64::VisitBinaryOperation(HBinaryOperation* instr) {
   last_visited_latency_ = DataType::IsFloatingPointType(instr->GetResultType())
       ? kArm64FloatingPointOpLatency
@@ -346,6 +455,31 @@ void SchedulingLatencyVisitorARM64::VisitVecStore(HVecStore* instr) {
   size_t size = DataType::Size(instr->GetPackedType());
   HandleVecAddress(instr, size);
   last_visited_latency_ = kArm64SIMDMemoryStoreLatency;
+}
+
+bool HSchedulerARM64::IsSchedulable(const HInstruction* instruction) const {
+  switch (instruction->GetKind()) {
+#define SCHEDULABLE_CASE(type, unused)       \
+    case HInstruction::InstructionKind::k##type:  \
+      return true;
+    FOR_EACH_SCHEDULED_SHARED_INSTRUCTION(SCHEDULABLE_CASE)
+    FOR_EACH_CONCRETE_INSTRUCTION_ARM64(SCHEDULABLE_CASE)
+    FOR_EACH_SCHEDULED_COMMON_INSTRUCTION(SCHEDULABLE_CASE)
+#undef SCHEDULABLE_CASE
+
+    default:
+      return HScheduler::IsSchedulable(instruction);
+  }
+}
+
+std::pair<SchedulingGraph, ScopedArenaVector<SchedulingNode*>>
+HSchedulerARM64::BuildSchedulingGraph(
+    HBasicBlock* block,
+    ScopedArenaAllocator* allocator,
+    const HeapLocationCollector* heap_location_collector) {
+  SchedulingLatencyVisitorARM64 latency_visitor;
+  return HScheduler::BuildSchedulingGraph(
+      block, allocator, heap_location_collector, &latency_visitor);
 }
 
 }  // namespace arm64

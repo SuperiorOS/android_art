@@ -28,7 +28,7 @@
 #include "runtime.h"
 #include "thread-inl.h"
 
-namespace art {
+namespace art HIDDEN {
 
 inline ScopedThreadStateChange::ScopedThreadStateChange(Thread* self, ThreadState new_thread_state)
     : self_(self), thread_state_(new_thread_state), expected_has_no_thread_(false) {

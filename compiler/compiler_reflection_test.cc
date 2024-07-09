@@ -29,7 +29,6 @@ namespace art HIDDEN {
 class CompilerReflectionTest : public CommonCompilerTest {};
 
 TEST_F(CompilerReflectionTest, StaticMainMethod) {
-  TEST_DISABLED_FOR_RISCV64();
   ScopedObjectAccess soa(Thread::Current());
   jobject jclass_loader = LoadDex("Main");
   StackHandleScope<1> hs(soa.Self());

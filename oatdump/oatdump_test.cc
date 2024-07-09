@@ -66,10 +66,10 @@ TEST_P(OatDumpTest, TestListMethods) {
 }
 
 TEST_P(OatDumpTest, TestSymbolize) {
-  TEST_DISABLED_FOR_RISCV64();
   if (GetParam() == Flavor::kDynamic) {
     TEST_DISABLED_FOR_TARGET();  // Can not write files inside the apex directory.
   } else {
+    TEST_DISABLED_FOR_RISCV64();
     TEST_DISABLED_FOR_ARM_AND_ARM64();
   }
   std::string error_msg;
@@ -77,8 +77,8 @@ TEST_P(OatDumpTest, TestSymbolize) {
 }
 
 TEST_P(OatDumpTest, TestExportDex) {
-  TEST_DISABLED_FOR_RISCV64();
   if (GetParam() == Flavor::kStatic) {
+    TEST_DISABLED_FOR_RISCV64();
     TEST_DISABLED_FOR_ARM_AND_ARM64();
   }
   std::string error_msg;

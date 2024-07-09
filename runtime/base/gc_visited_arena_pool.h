@@ -28,7 +28,7 @@
 #include "read_barrier_config.h"
 #include "runtime.h"
 
-namespace art {
+namespace art HIDDEN {
 
 // GcVisitedArenaPool can be used for tracking allocations so that they can
 // be visited during GC to update the GC-roots inside them.
@@ -46,7 +46,9 @@ class TrackedArena final : public Arena {
     if (first_obj_array_.get() != nullptr) {
       DCHECK_ALIGNED_PARAM(Size(), gPageSize);
       DCHECK_ALIGNED_PARAM(Begin(), gPageSize);
-      for (int i = 0, nr_pages = Size() / gPageSize; i < nr_pages; i++, page_begin += gPageSize) {
+      for (int i = 0, nr_pages = DivideByPageSize(Size());
+           i < nr_pages;
+           i++, page_begin += gPageSize) {
         uint8_t* first = first_obj_array_[i];
         if (first != nullptr) {
           visitor(page_begin, first, gPageSize);
@@ -77,7 +79,7 @@ class TrackedArena final : public Arena {
     } else {
       DCHECK_EQ(last_byte, End());
     }
-    for (size_t i = (last_byte - Begin()) / gPageSize;
+    for (size_t i = DivideByPageSize(last_byte - Begin());
          last_byte < End() && first_obj_array_[i] != nullptr;
          last_byte += gPageSize, i++) {
       // No body.
@@ -89,7 +91,7 @@ class TrackedArena final : public Arena {
     DCHECK_LE(Begin(), addr);
     DCHECK_GT(End(), addr);
     if (first_obj_array_.get() != nullptr) {
-      return first_obj_array_[(addr - Begin()) / gPageSize];
+      return first_obj_array_[DivideByPageSize(addr - Begin())];
     } else {
       // The pages of this arena contain array of GC-roots. So we don't need
       // first-object of any given page of the arena.
@@ -100,7 +102,7 @@ class TrackedArena final : public Arena {
 
   // Set 'obj_begin' in first_obj_array_ in every element for which it's the
   // first object.
-  void SetFirstObject(uint8_t* obj_begin, uint8_t* obj_end);
+  EXPORT void SetFirstObject(uint8_t* obj_begin, uint8_t* obj_end);
   // Setup the arena for deferred deletion.
   void SetupForDeferredDeletion(TrackedArena* next_arena) {
     DCHECK(next_arena == nullptr || next_arena->waiting_for_deletion_);
@@ -158,8 +160,8 @@ class GcVisitedArenaPool final : public ArenaPool {
   void LockReclaimMemory() override {}
   void TrimMaps() override {}
 
-  uint8_t* AllocSingleObjArena(size_t size) REQUIRES(!lock_);
-  void FreeSingleObjArena(uint8_t* addr) REQUIRES(!lock_);
+  EXPORT uint8_t* AllocSingleObjArena(size_t size) REQUIRES(!lock_);
+  EXPORT void FreeSingleObjArena(uint8_t* addr) REQUIRES(!lock_);
 
   bool Contains(void* ptr) REQUIRES(!lock_) {
     ReaderMutexLock rmu(Thread::Current(), lock_);
@@ -252,7 +254,7 @@ class GcVisitedArenaPool final : public ArenaPool {
   class TrackedArenaHash {
    public:
     size_t operator()(const TrackedArena* arena) const {
-      return std::hash<size_t>{}(reinterpret_cast<uintptr_t>(arena->Begin()) / gPageSize);
+      return std::hash<size_t>{}(DivideByPageSize(reinterpret_cast<uintptr_t>(arena->Begin())));
     }
   };
   using AllocatedArenaSet =

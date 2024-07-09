@@ -20,7 +20,7 @@
 
 #include "thread.h"
 
-namespace art {
+namespace art HIDDEN {
 
 
 void BaseReflectiveHandleScope::Describe(std::ostream& os) const {

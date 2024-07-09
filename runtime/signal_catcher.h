@@ -21,8 +21,9 @@
 
 #include "android-base/unique_fd.h"
 #include "base/mutex.h"
+#include "base/macros.h"
 
-namespace art {
+namespace art HIDDEN {
 
 class Runtime;
 class SignalSet;

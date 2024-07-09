@@ -34,9 +34,9 @@
 #include "scoped_thread_state_change-inl.h"
 #include "stack_reference.h"
 #include "thread-inl.h"
-#include "well_known_classes.h"
+#include "well_known_classes-inl.h"
 
-namespace art {
+namespace art HIDDEN {
 namespace {
 
 using android::base::StringPrintf;
@@ -259,15 +259,15 @@ class ArgArray {
         }
       }
 
-#define DO_FIRST_ARG(match_descriptor, get_fn, append) { \
+#define DO_FIRST_ARG(boxed, get_fn, append) { \
           if (LIKELY(arg != nullptr && \
-              arg->GetClass()->DescriptorEquals(match_descriptor))) { \
+                     arg->GetClass() == WellKnownClasses::java_lang_##boxed)) { \
             ArtField* primitive_field = arg->GetClass()->GetInstanceField(0); \
             append(primitive_field-> get_fn(arg.Get()));
 
-#define DO_ARG(match_descriptor, get_fn, append) \
+#define DO_ARG(boxed, get_fn, append) \
           } else if (LIKELY(arg != nullptr && \
-                            arg->GetClass<>()->DescriptorEquals(match_descriptor))) { \
+                            arg->GetClass() == WellKnownClasses::java_lang_##boxed)) { \
             ArtField* primitive_field = arg->GetClass()->GetInstanceField(0); \
             append(primitive_field-> get_fn(arg.Get()));
 
@@ -293,54 +293,54 @@ class ArgArray {
           Append(arg.Get());
           break;
         case 'Z':
-          DO_FIRST_ARG("Ljava/lang/Boolean;", GetBoolean, Append)
+          DO_FIRST_ARG(Boolean, GetBoolean, Append)
           DO_FAIL("boolean")
           break;
         case 'B':
-          DO_FIRST_ARG("Ljava/lang/Byte;", GetByte, Append)
+          DO_FIRST_ARG(Byte, GetByte, Append)
           DO_FAIL("byte")
           break;
         case 'C':
-          DO_FIRST_ARG("Ljava/lang/Character;", GetChar, Append)
+          DO_FIRST_ARG(Character, GetChar, Append)
           DO_FAIL("char")
           break;
         case 'S':
-          DO_FIRST_ARG("Ljava/lang/Short;", GetShort, Append)
-          DO_ARG("Ljava/lang/Byte;", GetByte, Append)
+          DO_FIRST_ARG(Short, GetShort, Append)
+          DO_ARG(Byte, GetByte, Append)
           DO_FAIL("short")
           break;
         case 'I':
-          DO_FIRST_ARG("Ljava/lang/Integer;", GetInt, Append)
-          DO_ARG("Ljava/lang/Character;", GetChar, Append)
-          DO_ARG("Ljava/lang/Short;", GetShort, Append)
-          DO_ARG("Ljava/lang/Byte;", GetByte, Append)
+          DO_FIRST_ARG(Integer, GetInt, Append)
+          DO_ARG(Character, GetChar, Append)
+          DO_ARG(Short, GetShort, Append)
+          DO_ARG(Byte, GetByte, Append)
           DO_FAIL("int")
           break;
         case 'J':
-          DO_FIRST_ARG("Ljava/lang/Long;", GetLong, AppendWide)
-          DO_ARG("Ljava/lang/Integer;", GetInt, AppendWide)
-          DO_ARG("Ljava/lang/Character;", GetChar, AppendWide)
-          DO_ARG("Ljava/lang/Short;", GetShort, AppendWide)
-          DO_ARG("Ljava/lang/Byte;", GetByte, AppendWide)
+          DO_FIRST_ARG(Long, GetLong, AppendWide)
+          DO_ARG(Integer, GetInt, AppendWide)
+          DO_ARG(Character, GetChar, AppendWide)
+          DO_ARG(Short, GetShort, AppendWide)
+          DO_ARG(Byte, GetByte, AppendWide)
           DO_FAIL("long")
           break;
         case 'F':
-          DO_FIRST_ARG("Ljava/lang/Float;", GetFloat, AppendFloat)
-          DO_ARG("Ljava/lang/Long;", GetLong, AppendFloat)
-          DO_ARG("Ljava/lang/Integer;", GetInt, AppendFloat)
-          DO_ARG("Ljava/lang/Character;", GetChar, AppendFloat)
-          DO_ARG("Ljava/lang/Short;", GetShort, AppendFloat)
-          DO_ARG("Ljava/lang/Byte;", GetByte, AppendFloat)
+          DO_FIRST_ARG(Float, GetFloat, AppendFloat)
+          DO_ARG(Long, GetLong, AppendFloat)
+          DO_ARG(Integer, GetInt, AppendFloat)
+          DO_ARG(Character, GetChar, AppendFloat)
+          DO_ARG(Short, GetShort, AppendFloat)
+          DO_ARG(Byte, GetByte, AppendFloat)
           DO_FAIL("float")
           break;
         case 'D':
-          DO_FIRST_ARG("Ljava/lang/Double;", GetDouble, AppendDouble)
-          DO_ARG("Ljava/lang/Float;", GetFloat, AppendDouble)
-          DO_ARG("Ljava/lang/Long;", GetLong, AppendDouble)
-          DO_ARG("Ljava/lang/Integer;", GetInt, AppendDouble)
-          DO_ARG("Ljava/lang/Character;", GetChar, AppendDouble)
-          DO_ARG("Ljava/lang/Short;", GetShort, AppendDouble)
-          DO_ARG("Ljava/lang/Byte;", GetByte, AppendDouble)
+          DO_FIRST_ARG(Double, GetDouble, AppendDouble)
+          DO_ARG(Float, GetFloat, AppendDouble)
+          DO_ARG(Long, GetLong, AppendDouble)
+          DO_ARG(Integer, GetInt, AppendDouble)
+          DO_ARG(Character, GetChar, AppendDouble)
+          DO_ARG(Short, GetShort, AppendDouble)
+          DO_ARG(Byte, GetByte, AppendDouble)
           DO_FAIL("double")
           break;
 #ifndef NDEBUG
@@ -952,28 +952,28 @@ static bool UnboxPrimitive(ObjPtr<mirror::Object> o,
   ObjPtr<mirror::Class> klass = o->GetClass();
   Primitive::Type primitive_type;
   ArtField* primitive_field = &klass->GetIFieldsPtr()->At(0);
-  if (klass->DescriptorEquals("Ljava/lang/Boolean;")) {
+  if (klass == WellKnownClasses::java_lang_Boolean) {
     primitive_type = Primitive::kPrimBoolean;
     boxed_value.SetZ(primitive_field->GetBoolean(o));
-  } else if (klass->DescriptorEquals("Ljava/lang/Byte;")) {
+  } else if (klass == WellKnownClasses::java_lang_Byte) {
     primitive_type = Primitive::kPrimByte;
     boxed_value.SetB(primitive_field->GetByte(o));
-  } else if (klass->DescriptorEquals("Ljava/lang/Character;")) {
+  } else if (klass == WellKnownClasses::java_lang_Character) {
     primitive_type = Primitive::kPrimChar;
     boxed_value.SetC(primitive_field->GetChar(o));
-  } else if (klass->DescriptorEquals("Ljava/lang/Float;")) {
+  } else if (klass == WellKnownClasses::java_lang_Float) {
     primitive_type = Primitive::kPrimFloat;
     boxed_value.SetF(primitive_field->GetFloat(o));
-  } else if (klass->DescriptorEquals("Ljava/lang/Double;")) {
+  } else if (klass == WellKnownClasses::java_lang_Double) {
     primitive_type = Primitive::kPrimDouble;
     boxed_value.SetD(primitive_field->GetDouble(o));
-  } else if (klass->DescriptorEquals("Ljava/lang/Integer;")) {
+  } else if (klass == WellKnownClasses::java_lang_Integer) {
     primitive_type = Primitive::kPrimInt;
     boxed_value.SetI(primitive_field->GetInt(o));
-  } else if (klass->DescriptorEquals("Ljava/lang/Long;")) {
+  } else if (klass == WellKnownClasses::java_lang_Long) {
     primitive_type = Primitive::kPrimLong;
     boxed_value.SetJ(primitive_field->GetLong(o));
-  } else if (klass->DescriptorEquals("Ljava/lang/Short;")) {
+  } else if (klass == WellKnownClasses::java_lang_Short) {
     primitive_type = Primitive::kPrimShort;
     boxed_value.SetS(primitive_field->GetShort(o));
   } else {

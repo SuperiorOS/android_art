@@ -35,7 +35,7 @@
 #include "thread.h"
 #include "thread_list.h"
 
-namespace art {
+namespace art HIDDEN {
 
 using android::base::StringPrintf;
 
@@ -246,11 +246,23 @@ void BaseMutex::DumpAll(std::ostream& os) {
 }
 
 void BaseMutex::CheckSafeToWait(Thread* self) {
-  if (self == nullptr) {
-    CheckUnattachedThread(level_);
+  if (!kDebugLocking) {
     return;
   }
-  if (kDebugLocking) {
+  // Avoid repeated reporting of the same violation in the common case.
+  // We somewhat ignore races in the duplicate elision code. The first kMaxReports and the first
+  // report for a given level_ should always appear.
+  static std::atomic<uint> last_level_reported(kLockLevelCount);
+  static constexpr int kMaxReports = 5;
+  static std::atomic<uint> num_reports(0);  // For the current level, more or less.
+
+  if (self == nullptr) {
+    CheckUnattachedThread(level_);
+  } else if (num_reports.load(std::memory_order_relaxed) > kMaxReports &&
+             last_level_reported.load(std::memory_order_relaxed) == level_) {
+    LOG(ERROR) << "Eliding probably redundant CheckSafeToWait() complaints";
+    return;
+  } else {
     CHECK(self->GetHeldMutex(level_) == this || level_ == kMonitorLock)
         << "Waiting on unacquired mutex: " << name_;
     bool bad_mutexes_held = false;
@@ -283,6 +295,12 @@ void BaseMutex::CheckSafeToWait(Thread* self) {
             bad_mutexes_held = true;
           }
         } else if (held_mutex != nullptr) {
+          if (last_level_reported.load(std::memory_order_relaxed) == level_) {
+            num_reports.fetch_add(1, std::memory_order_relaxed);
+          } else {
+            last_level_reported.store(level_, std::memory_order_relaxed);
+            num_reports.store(0, std::memory_order_relaxed);
+          }
           std::ostringstream oss;
           oss << "Holding \"" << held_mutex->name_ << "\" "
               << "(level " << LockLevel(i) << ") while performing wait on "
@@ -570,6 +588,7 @@ bool Mutex::IsDumpFrequent(Thread* thread, uint64_t try_times) {
   }
 }
 
+template <bool kCheck>
 bool Mutex::ExclusiveTryLock(Thread* self) {
   DCHECK(self == nullptr || self == Thread::Current());
   if (kDebugLocking && !recursive_) {
@@ -600,7 +619,7 @@ bool Mutex::ExclusiveTryLock(Thread* self) {
 #endif
     DCHECK_EQ(GetExclusiveOwnerTid(), 0);
     exclusive_owner_.store(SafeGetTid(self), std::memory_order_relaxed);
-    RegisterAsLocked(self);
+    RegisterAsLocked(self, kCheck);
   }
   recursion_count_++;
   if (kDebugLocking) {
@@ -610,6 +629,9 @@ bool Mutex::ExclusiveTryLock(Thread* self) {
   }
   return true;
 }
+
+template bool Mutex::ExclusiveTryLock<false>(Thread* self);
+template bool Mutex::ExclusiveTryLock<true>(Thread* self);
 
 bool Mutex::ExclusiveTryLockWithSpinning(Thread* self) {
   // Spin a small number of times, since this affects our ability to respond to suspension
@@ -717,11 +739,12 @@ void Mutex::ExclusiveUnlock(Thread* self) {
 }
 
 void Mutex::Dump(std::ostream& os) const {
-  os << (recursive_ ? "recursive " : "non-recursive ")
-      << name_
-      << " level=" << static_cast<int>(level_)
-      << " rec=" << recursion_count_
-      << " owner=" << GetExclusiveOwnerTid() << " ";
+  os << (recursive_ ? "recursive " : "non-recursive ") << name_
+     << " level=" << static_cast<int>(level_) << " rec=" << recursion_count_
+#if ART_USE_FUTEXES
+     << " state_and_contenders = " << std::hex << state_and_contenders_ << std::dec
+#endif
+     << " owner=" << GetExclusiveOwnerTid() << " ";
   DumpContention(os);
 }
 
@@ -923,7 +946,7 @@ void ReaderWriterMutex::HandleSharedLockContention(Thread* self, int32_t cur_sta
 }
 #endif
 
-bool ReaderWriterMutex::SharedTryLock(Thread* self) {
+bool ReaderWriterMutex::SharedTryLock(Thread* self, bool check) {
   DCHECK(self == nullptr || self == Thread::Current());
 #if ART_USE_FUTEXES
   bool done = false;
@@ -947,7 +970,7 @@ bool ReaderWriterMutex::SharedTryLock(Thread* self) {
     PLOG(FATAL) << "pthread_mutex_trylock failed for " << name_;
   }
 #endif
-  RegisterAsLocked(self);
+  RegisterAsLocked(self, check);
   AssertSharedHeld(self);
   return true;
 }

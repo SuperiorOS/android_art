@@ -32,7 +32,7 @@
 #include "runtime-inl.h"
 #include "thread.h"
 
-namespace art {
+namespace art HIDDEN {
 
 using android::base::StringAppendF;
 using android::base::StringPrintf;

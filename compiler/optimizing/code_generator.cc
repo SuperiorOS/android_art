@@ -48,7 +48,6 @@
 #include "dex/bytecode_utils.h"
 #include "dex/code_item_accessors-inl.h"
 #include "graph_visualizer.h"
-#include "image.h"
 #include "gc/space/image_space.h"
 #include "intern_table.h"
 #include "intrinsics.h"
@@ -60,7 +59,8 @@
 #include "parallel_move_resolver.h"
 #include "scoped_thread_state_change-inl.h"
 #include "ssa_liveness_analysis.h"
-#include "stack_map.h"
+#include "oat/image.h"
+#include "oat/stack_map.h"
 #include "stack_map_stream.h"
 #include "string_builder_append.h"
 #include "thread-current-inl.h"
@@ -156,6 +156,26 @@ bool CodeGenerator::EmitNonBakerReadBarrier() const {
 
 ReadBarrierOption CodeGenerator::GetCompilerReadBarrierOption() const {
   return EmitReadBarrier() ? kWithReadBarrier : kWithoutReadBarrier;
+}
+
+bool CodeGenerator::ShouldCheckGCCard(DataType::Type type,
+                                      HInstruction* value,
+                                      WriteBarrierKind write_barrier_kind) const {
+  const CompilerOptions& options = GetCompilerOptions();
+  const bool result =
+      // Check the GC card in debug mode,
+      options.EmitRunTimeChecksInDebugMode() &&
+      // only for CC GC,
+      options.EmitReadBarrier() &&
+      // and if we eliminated the write barrier in WBE.
+      !StoreNeedsWriteBarrier(type, value, write_barrier_kind) &&
+      CodeGenerator::StoreNeedsWriteBarrier(type, value);
+
+  DCHECK_IMPLIES(result, write_barrier_kind == WriteBarrierKind::kDontEmit);
+  DCHECK_IMPLIES(
+      result, !(GetGraph()->IsCompilingBaseline() && compiler_options_.ProfileBranches()));
+
+  return result;
 }
 
 ScopedArenaAllocator* CodeGenerator::GetScopedAllocator() {
@@ -1608,6 +1628,17 @@ void CodeGenerator::EmitParallelMoves(Location from1,
   GetMoveResolver()->EmitNativeCode(&parallel_move);
 }
 
+bool CodeGenerator::StoreNeedsWriteBarrier(DataType::Type type,
+                                           HInstruction* value,
+                                           WriteBarrierKind write_barrier_kind) const {
+  // Check that null value is not represented as an integer constant.
+  DCHECK_IMPLIES(type == DataType::Type::kReference, !value->IsIntConstant());
+  // Branch profiling currently doesn't support running optimizations.
+  return (GetGraph()->IsCompilingBaseline() && compiler_options_.ProfileBranches())
+            ? CodeGenerator::StoreNeedsWriteBarrier(type, value)
+            : write_barrier_kind != WriteBarrierKind::kDontEmit;
+}
+
 void CodeGenerator::ValidateInvokeRuntime(QuickEntrypointEnum entrypoint,
                                           HInstruction* instruction,
                                           SlowPathCode* slow_path) {
@@ -1682,6 +1713,7 @@ void CodeGenerator::ValidateInvokeRuntimeWithoutRecordingPcInfo(HInstruction* in
          instruction->IsArrayGet() ||
          instruction->IsArraySet() ||
          instruction->IsLoadClass() ||
+         instruction->IsLoadMethodType() ||
          instruction->IsLoadString() ||
          instruction->IsInstanceOf() ||
          instruction->IsCheckCast() ||

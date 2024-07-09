@@ -36,7 +36,7 @@
 #include "scoped_fast_native_object_access-inl.h"
 #include "well_known_classes-inl.h"
 
-namespace art {
+namespace art HIDDEN {
 
 static jboolean Unsafe_compareAndSwapInt(JNIEnv* env, jobject, jobject javaObj, jlong offset,
                                          jint expectedValue, jint newValue) {
@@ -531,8 +531,9 @@ static void Unsafe_unpark(JNIEnv* env, jobject, jobject jthread) {
     ThrowIllegalArgumentException("Argument to unpark() was not a Thread");
     return;
   }
-  art::MutexLock mu(soa.Self(), *art::Locks::thread_list_lock_);
-  art::Thread* thread = art::Thread::FromManagedThread(soa, mirror_thread);
+  Thread* self = soa.Self();
+  art::MutexLock mu(self, *art::Locks::thread_list_lock_);
+  art::Thread* thread = art::Thread::FromManagedThread(self, mirror_thread);
   if (thread != nullptr) {
     thread->Unpark();
   } else {

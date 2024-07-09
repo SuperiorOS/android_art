@@ -25,7 +25,7 @@
 #include "obj_ptr.h"
 #include "reference_table.h"
 
-namespace art {
+namespace art HIDDEN {
 
 class ArtMethod;
 class ArtField;
@@ -42,9 +42,9 @@ class JNIEnvExt : public JNIEnv {
   // Creates a new JNIEnvExt. Returns null on error, in which case error_msg
   // will contain a description of the error.
   static JNIEnvExt* Create(Thread* self, JavaVMExt* vm, std::string* error_msg);
-  static MemberOffset SegmentStateOffset(size_t pointer_size);
-  static MemberOffset LocalRefCookieOffset(size_t pointer_size);
-  static MemberOffset SelfOffset(size_t pointer_size);
+  static MemberOffset LrtSegmentStateOffset(PointerSize pointer_size);
+  static MemberOffset LrtPreviousStateOffset(PointerSize pointer_size);
+  static MemberOffset SelfOffset(PointerSize pointer_size);
   static jint GetEnvHandler(JavaVMExt* vm, /*out*/void** out, jint version);
 
   ~JNIEnvExt();
@@ -66,8 +66,8 @@ class JNIEnvExt : public JNIEnv {
   void UpdateLocal(IndirectRef iref, ObjPtr<mirror::Object> obj)
       REQUIRES_SHARED(Locks::mutator_lock_);
 
-  jobject NewLocalRef(mirror::Object* obj) REQUIRES_SHARED(Locks::mutator_lock_);
-  void DeleteLocalRef(jobject obj) REQUIRES_SHARED(Locks::mutator_lock_);
+  EXPORT jobject NewLocalRef(mirror::Object* obj) REQUIRES_SHARED(Locks::mutator_lock_);
+  EXPORT void DeleteLocalRef(jobject obj) REQUIRES_SHARED(Locks::mutator_lock_);
 
   void TrimLocals() REQUIRES_SHARED(Locks::mutator_lock_) {
     locals_.Trim();
@@ -79,14 +79,11 @@ class JNIEnvExt : public JNIEnv {
     return locals_.Capacity();
   }
 
-  jni::LRTSegmentState GetLocalRefCookie() const { return local_ref_cookie_; }
-  void SetLocalRefCookie(jni::LRTSegmentState new_cookie) { local_ref_cookie_ = new_cookie; }
-
-  jni::LRTSegmentState GetLocalsSegmentState() const REQUIRES_SHARED(Locks::mutator_lock_) {
-    return locals_.GetSegmentState();
+  jni::LRTSegmentState PushLocalReferenceFrame() {
+    return locals_.PushFrame();
   }
-  void SetLocalSegmentState(jni::LRTSegmentState new_state) REQUIRES_SHARED(Locks::mutator_lock_) {
-    locals_.SetSegmentState(new_state);
+  void PopLocalReferenceFrame(jni::LRTSegmentState previous_state) {
+    locals_.PopFrame(previous_state);
   }
 
   void VisitJniLocalRoots(RootVisitor* visitor, const RootInfo& root_info)
@@ -138,18 +135,20 @@ class JNIEnvExt : public JNIEnv {
   // to all threads.
   // Note: JNI function table overrides are sensitive to the order of operations wrt/ CheckJNI.
   //       After overriding the JNI function table, CheckJNI toggling is ignored.
-  static void SetTableOverride(const JNINativeInterface* table_override)
+  EXPORT static void SetTableOverride(const JNINativeInterface* table_override)
       REQUIRES(!Locks::thread_list_lock_, !Locks::jni_function_table_lock_);
 
   // Return either the regular, or the CheckJNI function table. Will return table_override_ instead
   // if it is not null.
-  static const JNINativeInterface* GetFunctionTable(bool check_jni)
+  EXPORT static const JNINativeInterface* GetFunctionTable(bool check_jni)
       REQUIRES(Locks::jni_function_table_lock_);
 
   static void ResetFunctionTable()
       REQUIRES(!Locks::thread_list_lock_, !Locks::jni_function_table_lock_);
 
  private:
+  static MemberOffset LocalReferenceTableOffset(PointerSize pointer_size);
+
   // Override of function tables. This applies to both default as well as instrumented (CheckJNI)
   // function tables.
   static const JNINativeInterface* table_override_ GUARDED_BY(Locks::jni_function_table_lock_);
@@ -167,9 +166,6 @@ class JNIEnvExt : public JNIEnv {
 
   // The invocation interface JavaVM.
   JavaVMExt* const vm_;
-
-  // Cookie used when using the local indirect reference table.
-  jni::LRTSegmentState local_ref_cookie_;
 
   // JNI local references.
   jni::LocalReferenceTable locals_;
@@ -204,7 +200,6 @@ class JNIEnvExt : public JNIEnv {
   std::atomic<bool> runtime_deleted_;
 
   template<bool kEnableIndexIds> friend class JNI;
-  friend class ScopedJniEnvLocalRefState;
   friend class Thread;
   friend IndirectReferenceTable* GetIndirectReferenceTable(ScopedObjectAccess& soa,
                                                            IndirectRefKind kind);
@@ -219,13 +214,10 @@ class ScopedJniEnvLocalRefState {
  public:
   explicit ScopedJniEnvLocalRefState(JNIEnvExt* env) :
       env_(env),
-      saved_local_ref_cookie_(env->local_ref_cookie_) {
-    env->local_ref_cookie_ = env->locals_.GetSegmentState();
-  }
+      saved_local_ref_cookie_(env->PushLocalReferenceFrame()) {}
 
   ~ScopedJniEnvLocalRefState() {
-    env_->locals_.SetSegmentState(env_->local_ref_cookie_);
-    env_->local_ref_cookie_ = saved_local_ref_cookie_;
+    env_->PopLocalReferenceFrame(saved_local_ref_cookie_);
   }
 
  private:

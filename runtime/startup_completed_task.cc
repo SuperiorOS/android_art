@@ -32,7 +32,7 @@
 #include "thread.h"
 #include "thread_list.h"
 
-namespace art {
+namespace art HIDDEN {
 
 class UnlinkStartupDexCacheVisitor : public DexCacheVisitor {
  public:

@@ -393,7 +393,6 @@ class HGraph : public ArenaObject<kArenaAllocGraph> {
         blocks_(allocator->Adapter(kArenaAllocBlockList)),
         reverse_post_order_(allocator->Adapter(kArenaAllocReversePostOrder)),
         linear_order_(allocator->Adapter(kArenaAllocLinearOrder)),
-        reachability_graph_(allocator, 0, 0, true, kArenaAllocReachabilityGraph),
         entry_block_(nullptr),
         exit_block_(nullptr),
         maximum_number_of_out_vregs_(0),
@@ -426,6 +425,7 @@ class HGraph : public ArenaObject<kArenaAllocGraph> {
         cached_current_method_(nullptr),
         art_method_(nullptr),
         compilation_kind_(compilation_kind),
+        useful_optimizing_(false),
         cha_single_implementation_list_(allocator->Adapter(kArenaAllocCHA)) {
     blocks_.reserve(kDefaultNumberOfBlocks);
   }
@@ -462,8 +462,6 @@ class HGraph : public ArenaObject<kArenaAllocGraph> {
 
   void ComputeDominanceInformation();
   void ClearDominanceInformation();
-  void ComputeReachabilityInformation();
-  void ClearReachabilityInformation();
   void ClearLoopInformation();
   void FindBackEdges(ArenaBitVector* visited);
   GraphAnalysisResult BuildDominatorTree();
@@ -620,10 +618,6 @@ class HGraph : public ArenaObject<kArenaAllocGraph> {
     has_bounds_checks_ = value;
   }
 
-  // Returns true if dest is reachable from source, using either blocks or block-ids.
-  bool PathBetween(const HBasicBlock* source, const HBasicBlock* dest) const;
-  bool PathBetween(uint32_t source_id, uint32_t dest_id) const;
-
   // Is the code known to be robust against eliminating dead references
   // and the effects of early finalization?
   bool IsDeadReferenceSafe() const { return dead_reference_safe_; }
@@ -749,6 +743,9 @@ class HGraph : public ArenaObject<kArenaAllocGraph> {
   void SetNumberOfCHAGuards(uint32_t num) { number_of_cha_guards_ = num; }
   void IncrementNumberOfCHAGuards() { number_of_cha_guards_++; }
 
+  void SetUsefulOptimizing() { useful_optimizing_ = true; }
+  bool IsUsefulOptimizing() const { return useful_optimizing_; }
+
  private:
   void RemoveDeadBlocksInstructionsAsUsersAndDisconnect(const ArenaBitVector& visited) const;
   void RemoveDeadBlocks(const ArenaBitVector& visited);
@@ -797,10 +794,6 @@ class HGraph : public ArenaObject<kArenaAllocGraph> {
   // List of blocks to perform a linear order tree traversal. Unlike the reverse
   // post order, this order is not incrementally kept up-to-date.
   ArenaVector<HBasicBlock*> linear_order_;
-
-  // Reachability graph for checking connectedness between nodes. Acts as a partitioned vector where
-  // each RoundUp(blocks_.size(), BitVector::kWordBits) is the reachability of each node.
-  ArenaBitVectorArray reachability_graph_;
 
   HBasicBlock* entry_block_;
   HBasicBlock* exit_block_;
@@ -907,6 +900,10 @@ class HGraph : public ArenaObject<kArenaAllocGraph> {
   // stack maps to mark compiled code entries which the interpreter can
   // directly jump to.
   const CompilationKind compilation_kind_;
+
+  // Whether after compiling baseline it is still useful re-optimizing this
+  // method.
+  bool useful_optimizing_;
 
   // List of methods that are assumed to have single implementation.
   ArenaSet<ArtMethod*> cha_single_implementation_list_;
@@ -2451,18 +2448,26 @@ class HInstruction : public ArenaObject<kArenaAllocInstruction> {
   bool IsRemovable() const {
     return
         !DoesAnyWrite() &&
-        !CanThrow() &&
+        // TODO(solanes): Merge calls from IsSuspendCheck to IsControlFlow into one that doesn't
+        // do virtual dispatching.
         !IsSuspendCheck() &&
-        !IsControlFlow() &&
         !IsNop() &&
         !IsParameterValue() &&
         // If we added an explicit barrier then we should keep it.
         !IsMemoryBarrier() &&
-        !IsConstructorFence();
+        !IsConstructorFence() &&
+        !IsControlFlow() &&
+        !CanThrow();
   }
 
   bool IsDeadAndRemovable() const {
-    return IsRemovable() && !HasUses();
+    return !HasUses() && IsRemovable();
+  }
+
+  bool IsPhiDeadAndRemovable() const {
+    DCHECK(IsPhi());
+    DCHECK(IsRemovable()) << " phis are always removable";
+    return !HasUses();
   }
 
   // Does this instruction dominate `other_instruction`?
@@ -2900,6 +2905,10 @@ class HBackwardInstructionIterator : public ValueObject {
  public:
   explicit HBackwardInstructionIterator(const HInstructionList& instructions)
       : instruction_(instructions.last_instruction_) {
+    next_ = Done() ? nullptr : instruction_->GetPrevious();
+  }
+
+  explicit HBackwardInstructionIterator(HInstruction* instruction) : instruction_(instruction) {
     next_ = Done() ? nullptr : instruction_->GetPrevious();
   }
 
@@ -6369,19 +6378,13 @@ class HInstanceFieldGet final : public HExpression<1> {
 };
 
 enum class WriteBarrierKind {
-  // Emit the write barrier, with a runtime optimization which checks if the value that it is being
-  // set is null.
-  kEmitWithNullCheck,
-  // Emit the write barrier, without the runtime null check optimization. This could be set because:
-  //  A) It is a write barrier for an ArraySet (which does the optimization with the type check, so
-  //  it never does the optimization at the write barrier stage)
-  //  B) We know that the input can't be null
-  //  C) This write barrier is actually several write barriers coalesced into one. Potentially we
-  //  could ask if every value is null for a runtime optimization at the cost of compile time / code
-  //  size. At the time of writing it was deemed not worth the effort.
-  kEmitNoNullCheck,
+  // Emit the write barrier. This write barrier is not being relied on so e.g. codegen can decide to
+  // skip it if the value stored is null. This is the default behavior.
+  kEmitNotBeingReliedOn,
+  // Emit the write barrier. This write barrier is being relied on and must be emitted.
+  kEmitBeingReliedOn,
   // Skip emitting the write barrier. This could be set because:
-  //  A) The write barrier is not needed (e.g. it is not a reference, or the value is the null
+  //  A) The write barrier is not needed (i.e. it is not a reference, or the value is the null
   //  constant)
   //  B) This write barrier was coalesced into another one so there's no need to emit it.
   kDontEmit,
@@ -6412,7 +6415,7 @@ class HInstanceFieldSet final : public HExpression<2> {
                     declaring_class_def_index,
                     dex_file) {
     SetPackedFlag<kFlagValueCanBeNull>(true);
-    SetPackedField<WriteBarrierKindField>(WriteBarrierKind::kEmitWithNullCheck);
+    SetPackedField<WriteBarrierKindField>(WriteBarrierKind::kEmitNotBeingReliedOn);
     SetRawInputAt(0, object);
     SetRawInputAt(1, value);
   }
@@ -6433,8 +6436,11 @@ class HInstanceFieldSet final : public HExpression<2> {
   void ClearValueCanBeNull() { SetPackedFlag<kFlagValueCanBeNull>(false); }
   WriteBarrierKind GetWriteBarrierKind() { return GetPackedField<WriteBarrierKindField>(); }
   void SetWriteBarrierKind(WriteBarrierKind kind) {
-    DCHECK(kind != WriteBarrierKind::kEmitWithNullCheck)
+    DCHECK(kind != WriteBarrierKind::kEmitNotBeingReliedOn)
         << "We shouldn't go back to the original value.";
+    DCHECK_IMPLIES(kind == WriteBarrierKind::kDontEmit,
+                   GetWriteBarrierKind() != WriteBarrierKind::kEmitBeingReliedOn)
+        << "If a write barrier was relied on by other write barriers, we cannot skip emitting it.";
     SetPackedField<WriteBarrierKindField>(kind);
   }
 
@@ -6576,8 +6582,7 @@ class HArraySet final : public HExpression<3> {
     SetPackedFlag<kFlagNeedsTypeCheck>(value->GetType() == DataType::Type::kReference);
     SetPackedFlag<kFlagValueCanBeNull>(true);
     SetPackedFlag<kFlagStaticTypeOfArrayIsObjectArray>(false);
-    // ArraySets never do the null check optimization at the write barrier stage.
-    SetPackedField<WriteBarrierKindField>(WriteBarrierKind::kEmitNoNullCheck);
+    SetPackedField<WriteBarrierKindField>(WriteBarrierKind::kEmitNotBeingReliedOn);
     SetRawInputAt(0, array);
     SetRawInputAt(1, index);
     SetRawInputAt(2, value);
@@ -6653,10 +6658,11 @@ class HArraySet final : public HExpression<3> {
   WriteBarrierKind GetWriteBarrierKind() { return GetPackedField<WriteBarrierKindField>(); }
 
   void SetWriteBarrierKind(WriteBarrierKind kind) {
-    DCHECK(kind != WriteBarrierKind::kEmitNoNullCheck)
+    DCHECK(kind != WriteBarrierKind::kEmitNotBeingReliedOn)
         << "We shouldn't go back to the original value.";
-    DCHECK(kind != WriteBarrierKind::kEmitWithNullCheck)
-        << "We never do the null check optimization for ArraySets.";
+    DCHECK_IMPLIES(kind == WriteBarrierKind::kDontEmit,
+                   GetWriteBarrierKind() != WriteBarrierKind::kEmitBeingReliedOn)
+        << "If a write barrier was relied on by other write barriers, we cannot skip emitting it.";
     SetPackedField<WriteBarrierKindField>(kind);
   }
 
@@ -7313,6 +7319,16 @@ class HLoadMethodHandle final : public HInstruction {
 
 class HLoadMethodType final : public HInstruction {
  public:
+  // Determines how to load the MethodType.
+  enum class LoadKind {
+    // Load from an entry in the .bss section using a PC-relative load.
+    kBssEntry,
+    // Load using a single runtime call.
+    kRuntimeCall,
+
+    kLast = kRuntimeCall,
+  };
+
   HLoadMethodType(HCurrentMethod* current_method,
                   dex::ProtoIndex proto_index,
                   const DexFile& dex_file,
@@ -7324,6 +7340,7 @@ class HLoadMethodType final : public HInstruction {
         special_input_(HUserRecord<HInstruction*>(current_method)),
         proto_index_(proto_index),
         dex_file_(dex_file) {
+    SetPackedField<LoadKindField>(LoadKind::kRuntimeCall);
   }
 
   using HInstruction::GetInputRecords;  // Keep the const version visible.
@@ -7333,6 +7350,12 @@ class HLoadMethodType final : public HInstruction {
   }
 
   bool IsClonable() const override { return true; }
+
+  void SetLoadKind(LoadKind load_kind);
+
+  LoadKind GetLoadKind() const {
+    return GetPackedField<LoadKindField>();
+  }
 
   dex::ProtoIndex GetProtoIndex() const { return proto_index_; }
 
@@ -7352,12 +7375,31 @@ class HLoadMethodType final : public HInstruction {
   DEFAULT_COPY_CONSTRUCTOR(LoadMethodType);
 
  private:
+  static constexpr size_t kFieldLoadKind = kNumberOfGenericPackedBits;
+  static constexpr size_t kFieldLoadKindSize =
+      MinimumBitsToStore(static_cast<size_t>(LoadKind::kLast));
+  static constexpr size_t kNumberOfLoadMethodTypePackedBits = kFieldLoadKind + kFieldLoadKindSize;
+  static_assert(kNumberOfLoadMethodTypePackedBits <= kMaxNumberOfPackedBits,
+      "Too many packed fields.");
+  using LoadKindField = BitField<LoadKind, kFieldLoadKind, kFieldLoadKindSize>;
+
   // The special input is the HCurrentMethod for kRuntimeCall.
   HUserRecord<HInstruction*> special_input_;
 
   const dex::ProtoIndex proto_index_;
   const DexFile& dex_file_;
 };
+
+std::ostream& operator<<(std::ostream& os, HLoadMethodType::LoadKind rhs);
+
+// Note: defined outside class to see operator<<(., HLoadMethodType::LoadKind).
+inline void HLoadMethodType::SetLoadKind(LoadKind load_kind) {
+  // The load kind should be determined before inserting the instruction to the graph.
+  DCHECK(GetBlock() == nullptr);
+  DCHECK(GetEnvironment() == nullptr);
+  DCHECK_EQ(GetLoadKind(), LoadKind::kRuntimeCall);
+  SetPackedField<LoadKindField>(load_kind);
+}
 
 /**
  * Performs an initialization check on its Class object input.
@@ -7480,7 +7522,7 @@ class HStaticFieldSet final : public HExpression<2> {
                     declaring_class_def_index,
                     dex_file) {
     SetPackedFlag<kFlagValueCanBeNull>(true);
-    SetPackedField<WriteBarrierKindField>(WriteBarrierKind::kEmitWithNullCheck);
+    SetPackedField<WriteBarrierKindField>(WriteBarrierKind::kEmitNotBeingReliedOn);
     SetRawInputAt(0, cls);
     SetRawInputAt(1, value);
   }
@@ -7498,8 +7540,11 @@ class HStaticFieldSet final : public HExpression<2> {
 
   WriteBarrierKind GetWriteBarrierKind() { return GetPackedField<WriteBarrierKindField>(); }
   void SetWriteBarrierKind(WriteBarrierKind kind) {
-    DCHECK(kind != WriteBarrierKind::kEmitWithNullCheck)
+    DCHECK(kind != WriteBarrierKind::kEmitNotBeingReliedOn)
         << "We shouldn't go back to the original value.";
+    DCHECK_IMPLIES(kind == WriteBarrierKind::kDontEmit,
+                   GetWriteBarrierKind() != WriteBarrierKind::kEmitBeingReliedOn)
+        << "If a write barrier was relied on by other write barriers, we cannot skip emitting it.";
     SetPackedField<WriteBarrierKindField>(kind);
   }
 
@@ -8527,6 +8572,9 @@ class HGraphVisitor : public ValueObject {
 #undef DECLARE_VISIT_INSTRUCTION
 
  protected:
+  void VisitPhis(HBasicBlock* block);
+  void VisitNonPhiInstructions(HBasicBlock* block);
+
   OptimizingCompilerStats* stats_;
 
  private:

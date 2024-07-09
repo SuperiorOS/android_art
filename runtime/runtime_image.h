@@ -19,7 +19,9 @@
 
 #include <string>
 
-namespace art {
+#include "base/macros.h"
+
+namespace art HIDDEN {
 
 class RuntimeImage {
  public:
@@ -30,9 +32,9 @@ class RuntimeImage {
   //
   // If any of the arguments is a valid glob (a pattern that contains '**' or those documented in
   // glob(7)), returns a valid glob.
-  static std::string GetRuntimeImagePath(const std::string& app_data_dir,
-                                         const std::string& dex_location,
-                                         const std::string& isa);
+  EXPORT static std::string GetRuntimeImagePath(const std::string& app_data_dir,
+                                                const std::string& dex_location,
+                                                const std::string& isa);
 
   // Same as above, but takes data dir and ISA from the runtime.
   static std::string GetRuntimeImagePath(const std::string& dex_location);
@@ -42,7 +44,7 @@ class RuntimeImage {
   //
   // If the argument is a valid glob (a pattern that contains '**' or those documented in glob(7)),
   // returns a valid glob.
-  static std::string GetRuntimeImageDir(const std::string& app_data_dir);
+  EXPORT static std::string GetRuntimeImageDir(const std::string& app_data_dir);
 };
 
 }  // namespace art

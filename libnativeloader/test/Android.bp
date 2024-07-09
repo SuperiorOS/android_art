@@ -66,16 +66,6 @@ android_test_helper_app {
     ],
 }
 
-java_library {
-    name: "loadlibrarytest_test_utils",
-    sdk_version: "31",
-    static_libs: [
-        "androidx.test.ext.junit",
-        "androidx.test.ext.truth",
-    ],
-    srcs: ["src/android/test/lib/TestUtils.java"],
-}
-
 // Test fixture that represents a shared library in /system/framework.
 java_library {
     name: "libnativeloader_system_shared_lib",
@@ -110,6 +100,24 @@ java_library {
     srcs: ["src/android/test/vendorsharedlib/VendorSharedLib.java"],
 }
 
+java_library {
+    name: "loadlibrarytest_testlib",
+    sdk_version: "system_31",
+    static_libs: [
+        "androidx.test.ext.junit",
+        "androidx.test.ext.truth",
+        "androidx.test.rules",
+        "modules-utils-build_system",
+    ],
+    libs: [
+        "libnativeloader_system_shared_lib",
+        "libnativeloader_system_ext_shared_lib",
+        "libnativeloader_product_shared_lib",
+        "libnativeloader_vendor_shared_lib",
+    ],
+    srcs: ["src/android/test/lib/*.java"],
+}
+
 java_defaults {
     name: "loadlibrarytest_app_defaults",
     defaults: ["art_module_source_build_java_defaults"],
@@ -120,9 +128,7 @@ java_defaults {
     // measures getting enabled in these tests, so set some high number.
     target_sdk_version: "9999",
     static_libs: [
-        "androidx.test.ext.junit",
-        "androidx.test.rules",
-        "loadlibrarytest_test_utils",
+        "loadlibrarytest_testlib",
     ],
     libs: [
         "libnativeloader_system_shared_lib",

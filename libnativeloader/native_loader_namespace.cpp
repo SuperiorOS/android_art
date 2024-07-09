@@ -52,12 +52,12 @@ std::string GetLinkerError(bool is_bridged) {
 Result<NativeLoaderNamespace> NativeLoaderNamespace::GetExportedNamespace(const std::string& name,
                                                                           bool is_bridged) {
   if (!is_bridged) {
-    auto raw = android_get_exported_namespace(name.c_str());
+    android_namespace_t* raw = android_get_exported_namespace(name.c_str());
     if (raw != nullptr) {
       return NativeLoaderNamespace(name, raw);
     }
   } else {
-    auto raw = NativeBridgeGetExportedNamespace(name.c_str());
+    native_bridge_namespace_t* raw = NativeBridgeGetExportedNamespace(name.c_str());
     if (raw != nullptr) {
       return NativeLoaderNamespace(name, raw);
     }
@@ -69,7 +69,7 @@ Result<NativeLoaderNamespace> NativeLoaderNamespace::GetExportedNamespace(const 
 // "system" for those in the Runtime APEX. Try "system" first since
 // "default" always exists.
 Result<NativeLoaderNamespace> NativeLoaderNamespace::GetSystemNamespace(bool is_bridged) {
-  auto ns = GetExportedNamespace(kSystemNamespaceName, is_bridged);
+  Result<NativeLoaderNamespace> ns = GetExportedNamespace(kSystemNamespaceName, is_bridged);
   if (ns.ok()) return ns;
   ns = GetExportedNamespace(kDefaultNamespaceName, is_bridged);
   if (ns.ok()) return ns;
@@ -96,7 +96,7 @@ Result<NativeLoaderNamespace> NativeLoaderNamespace::Create(
   }
 
   // Fall back to the system namespace if no parent is set.
-  auto system_ns = GetSystemNamespace(is_bridged);
+  Result<NativeLoaderNamespace> system_ns = GetSystemNamespace(is_bridged);
   if (!system_ns.ok()) {
     return system_ns.error();
   }

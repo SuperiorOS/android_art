@@ -324,9 +324,11 @@ class JniCallingConvention : public CallingConvention {
   virtual ArrayRef<const ManagedRegister> CalleeSaveRegisters() const = 0;
 
   // Subset of core callee save registers that can be used for arbitrary purposes after
-  // constructing the JNI transition frame. These should be managed callee-saves as well.
+  // constructing the JNI transition frame. These should be both managed and native callee-saves.
   // These should not include special purpose registers such as thread register.
-  // JNI compiler currently requires at least 3 callee save scratch registers.
+  // JNI compiler currently requires at least 4 callee save scratch registers, except for x86
+  // where we have only 3 such registers but all args are passed on stack, so the method register
+  // is never clobbered by argument moves and does not need to be preserved elsewhere.
   virtual ArrayRef<const ManagedRegister> CalleeSaveScratchRegisters() const = 0;
 
   // Subset of core argument registers that can be used for arbitrary purposes after
@@ -355,10 +357,6 @@ class JniCallingConvention : public CallingConvention {
   virtual FrameOffset CurrentParamStackOffset() = 0;
 
   virtual ~JniCallingConvention() {}
-
-  static constexpr size_t SavedLocalReferenceCookieSize() {
-    return 4u;
-  }
 
   bool IsFastNative() const {
     return is_fast_native_;

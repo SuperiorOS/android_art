@@ -19,12 +19,13 @@
 
 #include "base/bit_string.h"
 #include "base/logging.h"
+#include "base/macros.h"
 #include "subtype_check_bits.h"
 
 // Forward-declare for testing purposes.
 struct SubtypeCheckInfoTest;
 
-namespace art {
+namespace art HIDDEN {
 
 /**
  * SubtypeCheckInfo is a logical label for the class SubtypeCheck data, which is necessary to

@@ -27,7 +27,7 @@
 #include "base/mem_map.h"
 #include "runtime_globals.h"
 
-namespace art {
+namespace art HIDDEN {
 
 namespace mirror {
 class Class;
@@ -45,7 +45,9 @@ class SpaceBitmap {
 
   // Initialize a space bitmap so that it points to a bitmap large enough to cover a heap at
   // heap_begin of heap_capacity bytes, where objects are guaranteed to be kAlignment-aligned.
-  static SpaceBitmap Create(const std::string& name, uint8_t* heap_begin, size_t heap_capacity);
+  EXPORT static SpaceBitmap Create(const std::string& name,
+                                   uint8_t* heap_begin,
+                                   size_t heap_capacity);
 
   // Initialize a space bitmap using the provided mem_map as the live bits. Takes ownership of the
   // mem map. The address range covered starts at heap_begin and is of size equal to heap_capacity.
@@ -55,7 +57,7 @@ class SpaceBitmap {
                                       uint8_t* heap_begin,
                                       size_t heap_capacity);
 
-  ~SpaceBitmap();
+  EXPORT ~SpaceBitmap();
 
   // Return the bitmap word index corresponding to memory offset (relative to
   // `HeapBegin()`) `offset`.
@@ -274,7 +276,20 @@ class SpaceBitmap {
 };
 
 using ContinuousSpaceBitmap = SpaceBitmap<kObjectAlignment>;
-using LargeObjectBitmap = SpaceBitmap<kLargeObjectAlignment>;
+
+// We pick the lowest supported page size to ensure that it's a constexpr, so
+// that we can keep bitmap accesses optimized. However, this means that when the
+// large-object alignment is higher than kMinPageSize, then not all bits in the
+// bitmap are actually in use.
+// In practice, this happens when running with a kernel that uses 16kB as the
+// page size, where 1 out of every 4 bits of the bitmap is used.
+
+// TODO: In the future, we should consider alternative fixed alignments for
+// large objects, disassociated from the page size. This would allow us to keep
+// accesses optimized, while also packing the bitmap efficiently, and reducing
+// its size enough that it would no longer make sense to allocate it with
+// mmap().
+using LargeObjectBitmap = SpaceBitmap<kMinPageSize>;
 
 template<size_t kAlignment>
 std::ostream& operator << (std::ostream& stream, const SpaceBitmap<kAlignment>& bitmap);

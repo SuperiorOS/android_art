@@ -22,6 +22,7 @@
 #include "base/atomic_pair.h"
 #include "base/bit_utils.h"
 #include "base/locks.h"
+#include "base/macros.h"
 #include "dex/dex_file.h"
 #include "dex/dex_file_types.h"
 #include "gc_root.h"  // Note: must not use -inl here to avoid circular dependency.
@@ -29,7 +30,7 @@
 #include "object.h"
 #include "object_array.h"
 
-namespace art {
+namespace art HIDDEN {
 
 namespace linker {
 class ImageWriter;
@@ -52,7 +53,7 @@ class DexCache;
 class MethodType;
 class String;
 
-template <typename T> struct PACKED(8) DexCachePair {
+template <typename T> struct alignas(8) DexCachePair {
   GcRoot<T> object;
   uint32_t index;
   // The array is initially [ {0,0}, {0,0}, {0,0} ... ]
@@ -89,7 +90,7 @@ template <typename T> struct PACKED(8) DexCachePair {
   T* GetObjectForIndex(uint32_t idx) REQUIRES_SHARED(Locks::mutator_lock_);
 };
 
-template <typename T> struct PACKED(2 * __SIZEOF_POINTER__) NativeDexCachePair {
+template <typename T> struct alignas(2 * __SIZEOF_POINTER__) NativeDexCachePair {
   T* object;
   size_t index;
   // This is similar to DexCachePair except that we're storing a native pointer
@@ -300,13 +301,12 @@ class MANAGED DexCache final : public Object {
                                      DexCachePair<Object>* pairs_end)
       REQUIRES_SHARED(Locks::mutator_lock_);
 
-  void Initialize(const DexFile* dex_file, ObjPtr<ClassLoader> class_loader)
-      REQUIRES_SHARED(Locks::mutator_lock_)
-      REQUIRES(Locks::dex_lock_);
+  EXPORT void Initialize(const DexFile* dex_file, ObjPtr<ClassLoader> class_loader)
+      REQUIRES_SHARED(Locks::mutator_lock_) REQUIRES(Locks::dex_lock_);
 
   // Zero all array references.
   // WARNING: This does not free the memory since it is in LinearAlloc.
-  void ResetNativeArrays() REQUIRES_SHARED(Locks::mutator_lock_);
+  EXPORT void ResetNativeArrays() REQUIRES_SHARED(Locks::mutator_lock_);
 
   template<VerifyObjectFlags kVerifyFlags = kDefaultVerifyFlags,
            ReadBarrierOption kReadBarrierOption = kWithReadBarrier>
@@ -368,7 +368,7 @@ class MANAGED DexCache final : public Object {
     SetFieldPtr<false>(OFFSET_OF_OBJECT_MEMBER(DexCache, dex_file_), dex_file);
   }
 
-  void SetLocation(ObjPtr<String> location) REQUIRES_SHARED(Locks::mutator_lock_);
+  EXPORT void SetLocation(ObjPtr<String> location) REQUIRES_SHARED(Locks::mutator_lock_);
 
   void VisitReflectiveTargets(ReflectiveValueVisitor* visitor) REQUIRES(Locks::mutator_lock_);
 

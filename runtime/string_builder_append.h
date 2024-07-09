@@ -22,9 +22,10 @@
 
 #include "base/bit_utils.h"
 #include "base/locks.h"
+#include "base/macros.h"
 #include "obj_ptr.h"
 
-namespace art {
+namespace art HIDDEN {
 
 class Thread;
 

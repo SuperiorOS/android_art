@@ -22,7 +22,7 @@
 #include "mirror/class.h"
 #include "mirror/object-inl.h"
 
-namespace art {
+namespace art HIDDEN {
 
 void HeapReflectiveSourceInfo::Describe(std::ostream& os) const {
   Locks::mutator_lock_->AssertExclusiveHeld(Thread::Current());

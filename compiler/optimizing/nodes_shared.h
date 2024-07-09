@@ -97,6 +97,10 @@ class HBitwiseNegatedRight final : public HBinaryOperation {
     }
   }
 
+  bool InstructionDataEquals(const HInstruction* other) const override {
+    return op_kind_ == other->AsBitwiseNegatedRight()->op_kind_;
+  }
+
   HConstant* Evaluate(HIntConstant* x, HIntConstant* y) const override {
     return GetBlock()->GetGraph()->GetIntConstant(
         Compute(x->GetValue(), y->GetValue()), GetDexPc());

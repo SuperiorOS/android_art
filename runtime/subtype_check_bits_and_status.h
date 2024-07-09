@@ -20,10 +20,11 @@
 #include "base/bit_struct.h"
 #include "base/bit_utils.h"
 #include "base/casts.h"
+#include "base/macros.h"
 #include "class_status.h"
 #include "subtype_check_bits.h"
 
-namespace art {
+namespace art HIDDEN {
 
 /*
  * Enables a highly efficient O(1) subtype comparison by storing extra data

@@ -40,13 +40,15 @@ namespace unix_file {
 class FdFile;
 }  // namespace unix_file
 
-namespace art {
+namespace art HIDDEN {
 
 class ArtField;
 class ArtMethod;
 class DexFile;
 class ShadowFrame;
 class Thread;
+
+struct MethodTraceRecord;
 
 using DexIndexBitSet = std::bitset<65536>;
 
@@ -121,12 +123,32 @@ static constexpr int32_t kHighTimestampOffsetInBytes =
 
 static constexpr uintptr_t kMaskTraceAction = ~0b11;
 
+class TraceWriterThreadPool : public ThreadPool {
+ public:
+  static TraceWriterThreadPool* Create(const char* name) {
+    TraceWriterThreadPool* pool = new TraceWriterThreadPool(name);
+    pool->CreateThreads();
+    return pool;
+  }
+
+  uintptr_t* FinishTaskAndClaimBuffer(size_t tid);
+
+ private:
+  explicit TraceWriterThreadPool(const char* name)
+      : ThreadPool(name,
+                   /* num_threads= */ 1,
+                   /* create_peers= */ false,
+                   /* worker_stack_size= */ ThreadPoolWorker::kDefaultStackSize) {}
+};
+
 class TraceWriter {
  public:
   TraceWriter(File* trace_file,
               TraceOutputMode output_mode,
               TraceClockSource clock_source,
               size_t buffer_size,
+              int num_trace_buffers,
+              int trace_format_version,
               uint32_t clock_overhead_ns);
 
   // This encodes all the events in the per-thread trace buffer and writes it to the trace file /
@@ -134,8 +156,8 @@ class TraceWriter {
   // required to serialize these since each method is encoded with a unique id which is assigned
   // when the method is seen for the first time in the recoreded events. So we need to serialize
   // these flushes across threads.
-  void FlushBuffer(Thread* thread, bool is_sync) REQUIRES_SHARED(Locks::mutator_lock_)
-      REQUIRES(!tracing_lock_);
+  void FlushBuffer(Thread* thread, bool is_sync, bool free_buffer)
+      REQUIRES_SHARED(Locks::mutator_lock_) REQUIRES(!tracing_lock_);
 
   // This is called when the per-thread buffer is full and a new entry needs to be recorded. This
   // returns a pointer to the new buffer where the entries should be recorded.
@@ -174,7 +196,42 @@ class TraceWriter {
   TraceOutputMode GetOutputMode() { return trace_output_mode_; }
   size_t GetBufferSize() { return buffer_size_; }
 
+  // Performs the initialization for the buffer pool. It marks all buffers as free by storing 0
+  // as the owner tid. This also allocates the buffer pool.
+  void InitializeTraceBuffers();
+
+  // Releases the trace buffer and transfers the ownership to the specified tid. If the tid is 0,
+  // then it means it is free and other threads can claim it.
+  void FetchTraceBufferForThread(int index, size_t tid);
+
+  // Tries to find a free buffer (which has owner of 0) from the pool. If there are no free buffers
+  // it fetches a task, flushes the contents of the buffer and returns that buffer.
+  uintptr_t* AcquireTraceBuffer(size_t tid);
+
+  // Returns the index corresponding to the start of the current_buffer. We allocate one large
+  // buffer and assign parts of it for each thread.
+  int GetMethodTraceIndex(uintptr_t* current_buffer);
+
  private:
+  void ReadValuesFromRecord(uintptr_t* method_trace_entries,
+                            size_t record_index,
+                            MethodTraceRecord& record,
+                            bool has_thread_cpu_clock,
+                            bool has_wall_clock);
+
+  void FlushEntriesFormatV2(uintptr_t* method_trace_entries,
+                            size_t tid,
+                            const std::unordered_map<ArtMethod*, std::string>& method_infos,
+                            size_t num_records,
+                            size_t* current_index,
+                            uint8_t* init_buffer_ptr) REQUIRES(tracing_lock_);
+
+  void FlushEntriesFormatV1(uintptr_t* method_trace_entries,
+                            size_t tid,
+                            const std::unordered_map<ArtMethod*, std::string>& method_infos,
+                            size_t end_offset,
+                            size_t* current_index,
+                            uint8_t* buffer_ptr) REQUIRES(tracing_lock_);
   // Get a 32-bit id for the method and specify if the method hasn't been seen before. If this is
   // the first time we see this method record information (like method name, declaring class etc.,)
   // about the method.
@@ -192,11 +249,7 @@ class TraceWriter {
   // Helper function to record method information when processing the events. These are used by
   // streaming output mode. Non-streaming modes dump the methods and threads list at the end of
   // tracing.
-  void RecordMethodInfo(const std::string& method_line,
-                        uint32_t method_id,
-                        size_t* index,
-                        uint8_t* buf,
-                        size_t size) REQUIRES(tracing_lock_);
+  void RecordMethodInfo(const std::string& method_line, uint32_t method_id) REQUIRES(tracing_lock_);
 
   // Encodes the trace event. This assumes that there is enough space reserved to encode the entry.
   void EncodeEventEntry(uint8_t* ptr,
@@ -205,6 +258,15 @@ class TraceWriter {
                         TraceAction action,
                         uint32_t thread_clock_diff,
                         uint32_t wall_clock_diff) REQUIRES(tracing_lock_);
+
+  // Encodes the header for the events block. This assumes that there is enough space reserved to
+  // encode the entry.
+  void EncodeEventBlockHeader(uint8_t* ptr,
+                              uint32_t thread_id,
+                              uint32_t method_index,
+                              uint32_t init_thread_clock_time,
+                              uint32_t init_wall_clock_time,
+                              uint16_t num_records) REQUIRES(tracing_lock_);
 
   // Ensures there is sufficient space in the buffer to record the requested_size. If there is not
   // enough sufficient space the current contents of the buffer are written to the file and
@@ -222,7 +284,7 @@ class TraceWriter {
   // Methods to output traced methods and threads.
   void DumpMethodList(std::ostream& os) REQUIRES_SHARED(Locks::mutator_lock_)
       REQUIRES(!tracing_lock_);
-  void DumpThreadList(std::ostream& os) REQUIRES(!Locks::thread_list_lock_) REQUIRES(tracing_lock_);
+  void DumpThreadList(std::ostream& os) REQUIRES(!Locks::thread_list_lock_, !tracing_lock_);
 
   // File to write trace data out to, null if direct to ddms.
   std::unique_ptr<File> trace_file_;
@@ -246,9 +308,11 @@ class TraceWriter {
   std::unordered_map<pid_t, uint16_t> thread_id_map_ GUARDED_BY(tracing_lock_);
   uint16_t current_thread_index_;
 
-  // Buffer to store trace data in non-streaming mode. This is only accessed in
-  // SuspendAll scope to flush the data from all threads into this buffer. This
-  // is only used in non-streaming mode
+  // Buffer used when generating trace data from the raw entries.
+  // In streaming mode, the trace data is flushed to file when the per-thread buffer gets full.
+  // In non-streaming mode, this data is flushed at the end of tracing. If the buffer gets full
+  // we stop tracing and following trace events are ignored. The size of this buffer is
+  // specified by the user in non-streaming mode.
   std::unique_ptr<uint8_t[]> buf_;
 
   // The cur_offset_ into the buf_. Accessed only in SuspendAll scope when flushing data from the
@@ -258,21 +322,30 @@ class TraceWriter {
   // Size of buf_.
   const size_t buffer_size_;
 
+  // Version of trace output
+  const int trace_format_version_;
+
   // Time trace was created.
   const uint64_t start_time_;
 
   // Did we overflow the buffer recording traces?
   bool overflow_;
 
+  // Total number of records flushed to file.
+  size_t num_records_;
+
   // Clock overhead.
   const uint32_t clock_overhead_ns_;
+
+  std::vector<std::atomic<size_t>> owner_tids_;
+  std::unique_ptr<uintptr_t[]> trace_buffer_;
 
   // Lock to protect common data structures accessed from multiple threads like
   // art_method_id_map_, thread_id_map_.
   Mutex tracing_lock_;
 
   // Thread pool to flush the trace entries to file.
-  std::unique_ptr<ThreadPool> thread_pool_;
+  std::unique_ptr<TraceWriterThreadPool> thread_pool_;
 };
 
 // Class for recording event traces. Trace data is either collected
@@ -285,6 +358,11 @@ class Trace final : public instrumentation::InstrumentationListener {
     kTraceClockSourceWallClock = 0x010,
     kTraceClockSourceThreadCpu = 0x100,
   };
+
+  static const int kFormatV1 = 0;
+  static const int kFormatV2 = 1;
+  static const int kTraceFormatVersionFlagMask = 0b110;
+  static const int kTraceFormatVersionShift = 1;
 
   enum class TraceMode {
     kMethodTracing,

@@ -34,6 +34,7 @@
 #include "linker/linker_patch.h"
 #include "mirror/class-inl.h"
 #include "optimizing/nodes.h"
+#include "optimizing/profiling_info_builder.h"
 #include "runtime.h"
 #include "scoped_thread_state_change-inl.h"
 #include "stack_map_stream.h"
@@ -265,8 +266,8 @@ void LocationsBuilderRISCV64::HandleInvoke(HInvoke* instruction) {
 
 class CompileOptimizedSlowPathRISCV64 : public SlowPathCodeRISCV64 {
  public:
-  CompileOptimizedSlowPathRISCV64(XRegister base, int32_t imm12)
-      : SlowPathCodeRISCV64(/*instruction=*/ nullptr),
+  CompileOptimizedSlowPathRISCV64(HSuspendCheck* suspend_check, XRegister base, int32_t imm12)
+      : SlowPathCodeRISCV64(suspend_check),
         base_(base),
         imm12_(imm12) {}
 
@@ -279,10 +280,18 @@ class CompileOptimizedSlowPathRISCV64 : public SlowPathCodeRISCV64 {
     XRegister counter = srs.AllocateXRegister();
     __ LoadConst32(counter, ProfilingInfo::GetOptimizeThreshold());
     __ Sh(counter, base_, imm12_);
+    if (instruction_ != nullptr) {
+      // Only saves live vector regs for SIMD.
+      SaveLiveRegisters(codegen, instruction_->GetLocations());
+    }
     __ Loadd(RA, TR, entrypoint_offset);
     // Note: we don't record the call here (and therefore don't generate a stack
     // map), as the entrypoint should never be suspended.
     __ Jalr(RA);
+    if (instruction_ != nullptr) {
+      // Only restores live vector regs for SIMD.
+      RestoreLiveRegisters(codegen, instruction_->GetLocations());
+    }
     __ J(GetExitLabel());
   }
 
@@ -2008,7 +2017,7 @@ void InstructionCodeGeneratorRISCV64::HandleGoto(HInstruction* instruction,
   HLoopInformation* info = block->GetLoopInformation();
 
   if (info != nullptr && info->IsBackEdge(*block) && info->HasSuspendCheck()) {
-    codegen_->MaybeIncrementHotness(/*is_frame_entry=*/ false);
+    codegen_->MaybeIncrementHotness(info->GetSuspendCheck(), /*is_frame_entry=*/ false);
     GenerateSuspendCheck(info->GetSuspendCheck(), successor);
     return;  // `GenerateSuspendCheck()` emitted the jump.
   }
@@ -2421,16 +2430,21 @@ void InstructionCodeGeneratorRISCV64::HandleShift(HBinaryOperation* instruction)
   }
 }
 
-void CodeGeneratorRISCV64::MarkGCCard(XRegister object,
-                                     XRegister value,
-                                     bool value_can_be_null) {
+void CodeGeneratorRISCV64::MaybeMarkGCCard(XRegister object,
+                                           XRegister value,
+                                           bool value_can_be_null) {
   Riscv64Label done;
-  ScratchRegisterScope srs(GetAssembler());
-  XRegister card = srs.AllocateXRegister();
-  XRegister temp = srs.AllocateXRegister();
   if (value_can_be_null) {
     __ Beqz(value, &done);
   }
+  MarkGCCard(object);
+  __ Bind(&done);
+}
+
+void CodeGeneratorRISCV64::MarkGCCard(XRegister object) {
+  ScratchRegisterScope srs(GetAssembler());
+  XRegister card = srs.AllocateXRegister();
+  XRegister temp = srs.AllocateXRegister();
   // Load the address of the card table into `card`.
   __ Loadd(card, TR, Thread::CardTableOffset<kRiscv64PointerSize>().Int32Value());
 
@@ -2451,9 +2465,27 @@ void CodeGeneratorRISCV64::MarkGCCard(XRegister object,
   // of the card to mark; and 2. to load the `kCardDirty` value) saves a load
   // (no need to explicitly load `kCardDirty` as an immediate value).
   __ Sb(card, temp, 0);  // No scratch register left for `Storeb()`.
-  if (value_can_be_null) {
-    __ Bind(&done);
-  }
+}
+
+void CodeGeneratorRISCV64::CheckGCCardIsValid(XRegister object) {
+  Riscv64Label done;
+  ScratchRegisterScope srs(GetAssembler());
+  XRegister card = srs.AllocateXRegister();
+  XRegister temp = srs.AllocateXRegister();
+  // Load the address of the card table into `card`.
+  __ Loadd(card, TR, Thread::CardTableOffset<kRiscv64PointerSize>().Int32Value());
+
+  // Calculate the address of the card corresponding to `object`.
+  __ Srli(temp, object, gc::accounting::CardTable::kCardShift);
+  __ Add(temp, card, temp);
+  // assert (!clean || !self->is_gc_marking)
+  __ Lb(temp, temp, 0);
+  static_assert(gc::accounting::CardTable::kCardClean == 0);
+  __ Bnez(temp, &done);
+  __ Loadw(temp, TR, Thread::IsGcMarkingOffset<kRiscv64PointerSize>().Int32Value());
+  __ Beqz(temp, &done);
+  __ Unimp();
+  __ Bind(&done);
 }
 
 void LocationsBuilderRISCV64::HandleFieldSet(HInstruction* instruction) {
@@ -2482,12 +2514,20 @@ void InstructionCodeGeneratorRISCV64::HandleFieldSet(HInstruction* instruction,
     codegen_->MaybeRecordImplicitNullCheck(instruction);
   }
 
-  if (CodeGenerator::StoreNeedsWriteBarrier(type, instruction->InputAt(1)) &&
-      write_barrier_kind != WriteBarrierKind::kDontEmit) {
-    codegen_->MarkGCCard(
-        obj,
-        value.AsRegister<XRegister>(),
-        value_can_be_null && write_barrier_kind == WriteBarrierKind::kEmitWithNullCheck);
+  bool needs_write_barrier =
+      codegen_->StoreNeedsWriteBarrier(type, instruction->InputAt(1), write_barrier_kind);
+  if (needs_write_barrier) {
+    if (value.IsConstant()) {
+      DCHECK_EQ(write_barrier_kind, WriteBarrierKind::kEmitBeingReliedOn);
+      codegen_->MarkGCCard(obj);
+    } else {
+      codegen_->MaybeMarkGCCard(
+          obj,
+          value.AsRegister<XRegister>(),
+          value_can_be_null && write_barrier_kind == WriteBarrierKind::kEmitNotBeingReliedOn);
+    }
+  } else if (codegen_->ShouldCheckGCCard(type, instruction->InputAt(1), write_barrier_kind)) {
+    codegen_->CheckGCCardIsValid(obj);
   }
 }
 
@@ -2883,6 +2923,12 @@ void LocationsBuilderRISCV64::VisitArraySet(HArraySet* instruction) {
   locations->SetInAt(0, Location::RequiresRegister());
   locations->SetInAt(1, Location::RegisterOrConstant(instruction->InputAt(1)));
   locations->SetInAt(2, ValueLocationForStore(instruction->GetValue()));
+  if (kPoisonHeapReferences &&
+      instruction->GetComponentType() == DataType::Type::kReference &&
+      !locations->InAt(1).IsConstant() &&
+      !locations->InAt(2).IsConstant()) {
+    locations->AddTemp(Location::RequiresRegister());
+  }
 }
 
 void InstructionCodeGeneratorRISCV64::VisitArraySet(HArraySet* instruction) {
@@ -2892,77 +2938,86 @@ void InstructionCodeGeneratorRISCV64::VisitArraySet(HArraySet* instruction) {
   Location value = locations->InAt(2);
   DataType::Type value_type = instruction->GetComponentType();
   bool needs_type_check = instruction->NeedsTypeCheck();
+  const WriteBarrierKind write_barrier_kind = instruction->GetWriteBarrierKind();
   bool needs_write_barrier =
-      CodeGenerator::StoreNeedsWriteBarrier(value_type, instruction->GetValue());
+      codegen_->StoreNeedsWriteBarrier(value_type, instruction->GetValue(), write_barrier_kind);
   size_t data_offset = mirror::Array::DataOffset(DataType::Size(value_type)).Uint32Value();
   SlowPathCodeRISCV64* slow_path = nullptr;
 
   if (needs_write_barrier) {
     DCHECK_EQ(value_type, DataType::Type::kReference);
-    DCHECK(!value.IsConstant());
-    Riscv64Label do_store;
+    DCHECK_IMPLIES(value.IsConstant(), value.GetConstant()->IsArithmeticZero());
+    const bool storing_constant_zero = value.IsConstant();
+    if (!storing_constant_zero) {
+      Riscv64Label do_store;
 
-    bool can_value_be_null = instruction->GetValueCanBeNull();
-    if (can_value_be_null) {
-      __ Beqz(value.AsRegister<XRegister>(), &do_store);
-    }
+      bool can_value_be_null = instruction->GetValueCanBeNull();
+      if (can_value_be_null) {
+        __ Beqz(value.AsRegister<XRegister>(), &do_store);
+      }
 
-    if (needs_type_check) {
-      slow_path = new (codegen_->GetScopedAllocator()) ArraySetSlowPathRISCV64(instruction);
-      codegen_->AddSlowPath(slow_path);
+      if (needs_type_check) {
+        slow_path = new (codegen_->GetScopedAllocator()) ArraySetSlowPathRISCV64(instruction);
+        codegen_->AddSlowPath(slow_path);
 
-      uint32_t class_offset = mirror::Object::ClassOffset().Int32Value();
-      uint32_t super_offset = mirror::Class::SuperClassOffset().Int32Value();
-      uint32_t component_offset = mirror::Class::ComponentTypeOffset().Int32Value();
+        uint32_t class_offset = mirror::Object::ClassOffset().Int32Value();
+        uint32_t super_offset = mirror::Class::SuperClassOffset().Int32Value();
+        uint32_t component_offset = mirror::Class::ComponentTypeOffset().Int32Value();
 
-      ScratchRegisterScope srs(GetAssembler());
-      XRegister temp1 = srs.AllocateXRegister();
-      XRegister temp2 = srs.AllocateXRegister();
+        ScratchRegisterScope srs(GetAssembler());
+        XRegister temp1 = srs.AllocateXRegister();
+        XRegister temp2 = srs.AllocateXRegister();
 
-      // Note that when read barriers are enabled, the type checks are performed
-      // without read barriers.  This is fine, even in the case where a class object
-      // is in the from-space after the flip, as a comparison involving such a type
-      // would not produce a false positive; it may of course produce a false
-      // negative, in which case we would take the ArraySet slow path.
+        // Note that when read barriers are enabled, the type checks are performed
+        // without read barriers.  This is fine, even in the case where a class object
+        // is in the from-space after the flip, as a comparison involving such a type
+        // would not produce a false positive; it may of course produce a false
+        // negative, in which case we would take the ArraySet slow path.
 
-      // /* HeapReference<Class> */ temp1 = array->klass_
-      __ Loadwu(temp1, array, class_offset);
-      codegen_->MaybeRecordImplicitNullCheck(instruction);
-      codegen_->MaybeUnpoisonHeapReference(temp1);
+        // /* HeapReference<Class> */ temp1 = array->klass_
+        __ Loadwu(temp1, array, class_offset);
+        codegen_->MaybeRecordImplicitNullCheck(instruction);
+        codegen_->MaybeUnpoisonHeapReference(temp1);
 
-      // /* HeapReference<Class> */ temp2 = temp1->component_type_
-      __ Loadwu(temp2, temp1, component_offset);
-      // /* HeapReference<Class> */ temp1 = value->klass_
-      __ Loadwu(temp1, value.AsRegister<XRegister>(), class_offset);
-      // If heap poisoning is enabled, no need to unpoison `temp1`
-      // nor `temp2`, as we are comparing two poisoned references.
-      if (instruction->StaticTypeOfArrayIsObjectArray()) {
-        Riscv64Label do_put;
-        __ Beq(temp1, temp2, &do_put);
-        // If heap poisoning is enabled, the `temp2` reference has
-        // not been unpoisoned yet; unpoison it now.
-        codegen_->MaybeUnpoisonHeapReference(temp2);
+        // /* HeapReference<Class> */ temp2 = temp1->component_type_
+        __ Loadwu(temp2, temp1, component_offset);
+        // /* HeapReference<Class> */ temp1 = value->klass_
+        __ Loadwu(temp1, value.AsRegister<XRegister>(), class_offset);
+        // If heap poisoning is enabled, no need to unpoison `temp1`
+        // nor `temp2`, as we are comparing two poisoned references.
+        if (instruction->StaticTypeOfArrayIsObjectArray()) {
+          Riscv64Label do_put;
+          __ Beq(temp1, temp2, &do_put);
+          // If heap poisoning is enabled, the `temp2` reference has
+          // not been unpoisoned yet; unpoison it now.
+          codegen_->MaybeUnpoisonHeapReference(temp2);
 
-        // /* HeapReference<Class> */ temp1 = temp2->super_class_
-        __ Loadwu(temp1, temp2, super_offset);
-        // If heap poisoning is enabled, no need to unpoison
-        // `temp1`, as we are comparing against null below.
-        __ Bnez(temp1, slow_path->GetEntryLabel());
-        __ Bind(&do_put);
-      } else {
-        __ Bne(temp1, temp2, slow_path->GetEntryLabel());
+          // /* HeapReference<Class> */ temp1 = temp2->super_class_
+          __ Loadwu(temp1, temp2, super_offset);
+          // If heap poisoning is enabled, no need to unpoison
+          // `temp1`, as we are comparing against null below.
+          __ Bnez(temp1, slow_path->GetEntryLabel());
+          __ Bind(&do_put);
+        } else {
+          __ Bne(temp1, temp2, slow_path->GetEntryLabel());
+        }
+      }
+
+      if (can_value_be_null) {
+        __ Bind(&do_store);
       }
     }
 
-    if (instruction->GetWriteBarrierKind() != WriteBarrierKind::kDontEmit) {
-      DCHECK_EQ(instruction->GetWriteBarrierKind(), WriteBarrierKind::kEmitNoNullCheck)
-          << " Already null checked so we shouldn't do it again.";
-      codegen_->MarkGCCard(array, value.AsRegister<XRegister>(), /* value_can_be_null= */ false);
-    }
-
-    if (can_value_be_null) {
-      __ Bind(&do_store);
-    }
+    DCHECK_NE(write_barrier_kind, WriteBarrierKind::kDontEmit);
+    // TODO(solanes): The WriteBarrierKind::kEmitNotBeingReliedOn case should be able to skip
+    // this write barrier when its value is null (without an extra Beqz since we already checked
+    // if the value is null for the type check). This will be done as a follow-up since it is a
+    // runtime optimization that needs extra care.
+    DCHECK_IMPLIES(storing_constant_zero,
+                   write_barrier_kind == WriteBarrierKind::kEmitBeingReliedOn);
+    codegen_->MarkGCCard(array);
+  } else if (codegen_->ShouldCheckGCCard(value_type, instruction->GetValue(), write_barrier_kind)) {
+    codegen_->CheckGCCardIsValid(array);
   }
 
   if (index.IsConstant()) {
@@ -2971,7 +3026,11 @@ void InstructionCodeGeneratorRISCV64::VisitArraySet(HArraySet* instruction) {
     Store(value, array, offset, value_type);
   } else {
     ScratchRegisterScope srs(GetAssembler());
-    XRegister tmp = srs.AllocateXRegister();
+    // Heap poisoning needs two scratch registers in `Store()`, except for null constants.
+    XRegister tmp =
+        (kPoisonHeapReferences && value_type == DataType::Type::kReference && !value.IsConstant())
+            ? locations->GetTemp(0).AsRegister<XRegister>()
+            : srs.AllocateXRegister();
     ShNAdd(tmp, index.AsRegister<XRegister>(), array, value_type);
     Store(value, tmp, data_offset, value_type);
   }
@@ -5683,7 +5742,8 @@ CodeGeneratorRISCV64::CodeGeneratorRISCV64(HGraph* graph,
   AddAllocatedRegister(Location::RegisterLocation(RA));
 }
 
-void CodeGeneratorRISCV64::MaybeIncrementHotness(bool is_frame_entry) {
+void CodeGeneratorRISCV64::MaybeIncrementHotness(HSuspendCheck* suspend_check,
+                                                 bool is_frame_entry) {
   if (GetCompilerOptions().CountHotnessInCompiledCode()) {
     ScratchRegisterScope srs(GetAssembler());
     XRegister method = is_frame_entry ? kArtMethodRegister : srs.AllocateXRegister();
@@ -5703,7 +5763,9 @@ void CodeGeneratorRISCV64::MaybeIncrementHotness(bool is_frame_entry) {
     __ Bind(&done);
   }
 
-  if (GetGraph()->IsCompilingBaseline() && !Runtime::Current()->IsAotCompiler()) {
+  if (GetGraph()->IsCompilingBaseline() &&
+      GetGraph()->IsUsefulOptimizing() &&
+      !Runtime::Current()->IsAotCompiler()) {
     ProfilingInfo* info = GetGraph()->GetProfilingInfo();
     DCHECK(info != nullptr);
     DCHECK(!HasEmptyFrame());
@@ -5715,7 +5777,7 @@ void CodeGeneratorRISCV64::MaybeIncrementHotness(bool is_frame_entry) {
     XRegister tmp = RA;
     __ LoadConst64(tmp, base_address);
     SlowPathCodeRISCV64* slow_path =
-        new (GetScopedAllocator()) CompileOptimizedSlowPathRISCV64(tmp, imm12);
+        new (GetScopedAllocator()) CompileOptimizedSlowPathRISCV64(suspend_check, tmp, imm12);
     AddSlowPath(slow_path);
     __ Lhu(counter, tmp, imm12);
     __ Beqz(counter, slow_path->GetEntryLabel());  // Can clobber `TMP` if taken.
@@ -5816,10 +5878,7 @@ void CodeGeneratorRISCV64::GenerateFrameEntry() {
 
   if (!HasEmptyFrame()) {
     // Make sure the frame size isn't unreasonably large.
-    if (GetFrameSize() > GetStackOverflowReservedBytes(InstructionSet::kRiscv64)) {
-      LOG(FATAL) << "Stack frame larger than "
-                 << GetStackOverflowReservedBytes(InstructionSet::kRiscv64) << " bytes";
-    }
+    DCHECK_LE(GetFrameSize(), GetMaximumFrameSize());
 
     // Spill callee-saved registers.
 
@@ -5860,7 +5919,7 @@ void CodeGeneratorRISCV64::GenerateFrameEntry() {
       __ Storew(Zero, SP, GetStackOffsetOfShouldDeoptimizeFlag());
     }
   }
-  MaybeIncrementHotness(/*is_frame_entry=*/ true);
+  MaybeIncrementHotness(/* suspend_check= */ nullptr, /*is_frame_entry=*/ true);
 }
 
 void CodeGeneratorRISCV64::GenerateFrameExit() {
@@ -6720,32 +6779,36 @@ void CodeGeneratorRISCV64::GenerateStaticOrDirectCall(HInvokeStaticOrDirect* inv
 
 void CodeGeneratorRISCV64::MaybeGenerateInlineCacheCheck(HInstruction* instruction,
                                                          XRegister klass) {
-  // We know the destination of an intrinsic, so no need to record inline caches.
-  if (!instruction->GetLocations()->Intrinsified() &&
-      GetGraph()->IsCompilingBaseline() &&
-      !Runtime::Current()->IsAotCompiler()) {
-    DCHECK(!instruction->GetEnvironment()->IsFromInlinedInvoke());
+  if (ProfilingInfoBuilder::IsInlineCacheUseful(instruction->AsInvoke(), this)) {
     ProfilingInfo* info = GetGraph()->GetProfilingInfo();
     DCHECK(info != nullptr);
-    InlineCache* cache = info->GetInlineCache(instruction->GetDexPc());
-    uint64_t address = reinterpret_cast64<uint64_t>(cache);
-    Riscv64Label done;
-    // The `art_quick_update_inline_cache` expects the inline cache in T5.
-    XRegister ic_reg = T5;
-    ScratchRegisterScope srs(GetAssembler());
-    DCHECK_EQ(srs.AvailableXRegisters(), 2u);
-    srs.ExcludeXRegister(ic_reg);
-    DCHECK_EQ(srs.AvailableXRegisters(), 1u);
-    __ LoadConst64(ic_reg, address);
-    {
-      ScratchRegisterScope srs2(GetAssembler());
-      XRegister tmp = srs2.AllocateXRegister();
-      __ Loadd(tmp, ic_reg, InlineCache::ClassesOffset().Int32Value());
-      // Fast path for a monomorphic cache.
-      __ Beq(klass, tmp, &done);
+    InlineCache* cache = ProfilingInfoBuilder::GetInlineCache(
+        info, GetCompilerOptions(), instruction->AsInvoke());
+    if (cache != nullptr) {
+      uint64_t address = reinterpret_cast64<uint64_t>(cache);
+      Riscv64Label done;
+      // The `art_quick_update_inline_cache` expects the inline cache in T5.
+      XRegister ic_reg = T5;
+      ScratchRegisterScope srs(GetAssembler());
+      DCHECK_EQ(srs.AvailableXRegisters(), 2u);
+      srs.ExcludeXRegister(ic_reg);
+      DCHECK_EQ(srs.AvailableXRegisters(), 1u);
+      __ LoadConst64(ic_reg, address);
+      {
+        ScratchRegisterScope srs2(GetAssembler());
+        XRegister tmp = srs2.AllocateXRegister();
+        __ Loadd(tmp, ic_reg, InlineCache::ClassesOffset().Int32Value());
+        // Fast path for a monomorphic cache.
+        __ Beq(klass, tmp, &done);
+      }
+      InvokeRuntime(kQuickUpdateInlineCache, instruction, instruction->GetDexPc());
+      __ Bind(&done);
+    } else {
+      // This is unexpected, but we don't guarantee stable compilation across
+      // JIT runs so just warn about it.
+      ScopedObjectAccess soa(Thread::Current());
+      LOG(WARNING) << "Missing inline cache for " << GetGraph()->GetArtMethod()->PrettyMethod();
     }
-    InvokeRuntime(kQuickUpdateInlineCache, instruction, instruction->GetDexPc());
-    __ Bind(&done);
   }
 }
 

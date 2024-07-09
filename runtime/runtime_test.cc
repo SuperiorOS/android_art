@@ -24,7 +24,7 @@
 #include "runtime.h"
 #include "thread-current-inl.h"
 
-namespace art {
+namespace art HIDDEN {
 
 class RuntimeTest : public CommonRuntimeTest {};
 

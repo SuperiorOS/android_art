@@ -70,7 +70,6 @@ void LivenessTest::TestCode(const std::vector<uint16_t>& data, const char* expec
 }
 
 TEST_F(LivenessTest, CFG1) {
-  TEST_DISABLED_FOR_RISCV64();
   const char* expected =
     "Block 0\n"
     "  live in: (0)\n"
@@ -94,7 +93,6 @@ TEST_F(LivenessTest, CFG1) {
 }
 
 TEST_F(LivenessTest, CFG2) {
-  TEST_DISABLED_FOR_RISCV64();
   const char* expected =
     "Block 0\n"
     "  live in: (0)\n"
@@ -117,7 +115,6 @@ TEST_F(LivenessTest, CFG2) {
 }
 
 TEST_F(LivenessTest, CFG3) {
-  TEST_DISABLED_FOR_RISCV64();
   const char* expected =
     "Block 0\n"  // entry block
     "  live in: (000)\n"
@@ -147,7 +144,6 @@ TEST_F(LivenessTest, CFG3) {
 }
 
 TEST_F(LivenessTest, CFG4) {
-  TEST_DISABLED_FOR_RISCV64();
   // var a;
   // if (0 == 0) {
   //   a = 5;
@@ -196,7 +192,6 @@ TEST_F(LivenessTest, CFG4) {
 }
 
 TEST_F(LivenessTest, CFG5) {
-  TEST_DISABLED_FOR_RISCV64();
   // var a = 0;
   // if (0 == 0) {
   // } else {
@@ -242,7 +237,6 @@ TEST_F(LivenessTest, CFG5) {
 }
 
 TEST_F(LivenessTest, Loop1) {
-  TEST_DISABLED_FOR_RISCV64();
   // Simple loop with one preheader and one back edge.
   // var a = 0;
   // while (a == a) {
@@ -289,7 +283,6 @@ TEST_F(LivenessTest, Loop1) {
 }
 
 TEST_F(LivenessTest, Loop3) {
-  TEST_DISABLED_FOR_RISCV64();
   // Test that the returned value stays live in a preceding loop.
   // var a = 0;
   // while (a == a) {
@@ -337,7 +330,6 @@ TEST_F(LivenessTest, Loop3) {
 
 
 TEST_F(LivenessTest, Loop4) {
-  TEST_DISABLED_FOR_RISCV64();
   // Make sure we support a preheader of a loop not being the first predecessor
   // in the predecessor list of the header.
   // var a = 0;
@@ -390,7 +382,6 @@ TEST_F(LivenessTest, Loop4) {
 }
 
 TEST_F(LivenessTest, Loop5) {
-  TEST_DISABLED_FOR_RISCV64();
   // Make sure we create a preheader of a loop when a header originally has two
   // incoming blocks and one back edge.
   // Bitsets are made of:
@@ -447,7 +438,6 @@ TEST_F(LivenessTest, Loop5) {
 }
 
 TEST_F(LivenessTest, Loop6) {
-  TEST_DISABLED_FOR_RISCV64();
   // Bitsets are made of:
   // (constant0, constant4, constant5, phi in block 2)
   const char* expected =
@@ -499,7 +489,6 @@ TEST_F(LivenessTest, Loop6) {
 
 
 TEST_F(LivenessTest, Loop7) {
-  TEST_DISABLED_FOR_RISCV64();
   // Bitsets are made of:
   // (constant0, constant4, constant5, phi in block 2, phi in block 6)
   const char* expected =
@@ -554,7 +543,6 @@ TEST_F(LivenessTest, Loop7) {
 }
 
 TEST_F(LivenessTest, Loop8) {
-  TEST_DISABLED_FOR_RISCV64();
   // var a = 0;
   // while (a == a) {
   //   a = a + a;

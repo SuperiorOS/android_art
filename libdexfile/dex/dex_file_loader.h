@@ -327,6 +327,17 @@ class DexFileLoader {
   const File* file_ = &kInvalidFile;
   std::optional<File> owned_file_;  // May be used as backing storage for 'file_'.
   std::shared_ptr<DexFileContainer> root_container_;
+
+  // The full absolute path to the dex file, if it was loaded from disk.
+  //
+  // Can also be a path to a multidex container (typically apk), followed by
+  // kMultiDexSeparator and the file inside the container.
+  //
+  // On host this may not be an absolute path.
+  //
+  // On device libnativeloader uses this to determine the location of the java
+  // package or shared library, which decides where to load native libraries
+  // from.
   const std::string location_;
 };
 

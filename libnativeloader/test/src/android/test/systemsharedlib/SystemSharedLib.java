@@ -17,5 +17,11 @@
 package android.test.systemsharedlib;
 
 public final class SystemSharedLib {
-    public static void loadLibrary(String name) { System.loadLibrary(name); }
+    public static void loadLibrary(String name) {
+        System.loadLibrary(name);
+    }
+
+    public static void load(String path) {
+        System.load(path);
+    }
 }

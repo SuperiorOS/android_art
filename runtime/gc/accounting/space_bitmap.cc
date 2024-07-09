@@ -28,7 +28,7 @@
 #include "mirror/object-inl.h"
 #include "mirror/object_array.h"
 
-namespace art {
+namespace art HIDDEN {
 namespace gc {
 namespace accounting {
 
@@ -173,7 +173,7 @@ void SpaceBitmap<kAlignment>::ClearRange(const mirror::Object* begin, const mirr
   const uintptr_t start_index = OffsetToIndex(begin_offset);
   const uintptr_t end_index = OffsetToIndex(end_offset);
   ZeroAndReleaseMemory(reinterpret_cast<uint8_t*>(&bitmap_begin_[start_index]),
-                      (end_index - start_index) * sizeof(*bitmap_begin_));
+                       (end_index - start_index) * sizeof(*bitmap_begin_));
 }
 
 template<size_t kAlignment>
@@ -250,7 +250,7 @@ void SpaceBitmap<kAlignment>::SweepWalk(const SpaceBitmap<kAlignment>& live_bitm
 }
 
 template class SpaceBitmap<kObjectAlignment>;
-template class SpaceBitmap<kLargeObjectAlignment>;
+template class SpaceBitmap<kMinPageSize>;
 
 }  // namespace accounting
 }  // namespace gc

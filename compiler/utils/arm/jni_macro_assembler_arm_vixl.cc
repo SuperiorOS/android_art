@@ -21,6 +21,8 @@
 
 #include "entrypoints/quick/quick_entrypoints.h"
 #include "indirect_reference_table.h"
+#include "jni/jni_env_ext.h"
+#include "jni/local_reference_table.h"
 #include "lock_word.h"
 #include "thread.h"
 
@@ -1001,7 +1003,7 @@ void ArmVIXLJNIMacroAssembler::DeliverPendingException() {
 }
 
 std::unique_ptr<JNIMacroLabel> ArmVIXLJNIMacroAssembler::CreateLabel() {
-  return std::unique_ptr<JNIMacroLabel>(new ArmVIXLJNIMacroLabel());
+  return std::unique_ptr<JNIMacroLabel>(new (asm_.GetAllocator()) ArmVIXLJNIMacroLabel());
 }
 
 void ArmVIXLJNIMacroAssembler::Jump(JNIMacroLabel* label) {
@@ -1106,6 +1108,36 @@ void ArmVIXLJNIMacroAssembler::Load(ArmManagedRegister dest,
     CHECK(dest.IsDRegister()) << dest;
     ___ Vldr(AsVIXLDRegister(dest), MemOperand(base, offset));
   }
+}
+
+void ArmVIXLJNIMacroAssembler::LoadLocalReferenceTableStates(ManagedRegister jni_env_reg,
+                                                             ManagedRegister previous_state_reg,
+                                                             ManagedRegister current_state_reg) {
+  constexpr size_t kLRTSegmentStateSize = sizeof(jni::LRTSegmentState);
+  DCHECK_EQ(kLRTSegmentStateSize, kRegSizeInBytes);
+  const MemberOffset previous_state_offset = JNIEnvExt::LrtPreviousStateOffset(kArmPointerSize);
+  const MemberOffset current_state_offset = JNIEnvExt::LrtSegmentStateOffset(kArmPointerSize);
+  DCHECK_EQ(previous_state_offset.SizeValue() + kLRTSegmentStateSize,
+            current_state_offset.SizeValue());
+
+  ___ Ldrd(AsVIXLRegister(previous_state_reg.AsArm()),
+           AsVIXLRegister(current_state_reg.AsArm()),
+           MemOperand(AsVIXLRegister(jni_env_reg.AsArm()), previous_state_offset.Int32Value()));
+}
+
+void ArmVIXLJNIMacroAssembler::StoreLocalReferenceTableStates(ManagedRegister jni_env_reg,
+                                                              ManagedRegister previous_state_reg,
+                                                              ManagedRegister current_state_reg) {
+  constexpr size_t kLRTSegmentStateSize = sizeof(jni::LRTSegmentState);
+  DCHECK_EQ(kLRTSegmentStateSize, kRegSizeInBytes);
+  const MemberOffset previous_state_offset = JNIEnvExt::LrtPreviousStateOffset(kArmPointerSize);
+  const MemberOffset current_state_offset = JNIEnvExt::LrtSegmentStateOffset(kArmPointerSize);
+  DCHECK_EQ(previous_state_offset.SizeValue() + kLRTSegmentStateSize,
+            current_state_offset.SizeValue());
+
+  ___ Strd(AsVIXLRegister(previous_state_reg.AsArm()),
+           AsVIXLRegister(current_state_reg.AsArm()),
+           MemOperand(AsVIXLRegister(jni_env_reg.AsArm()), previous_state_offset.Int32Value()));
 }
 
 }  // namespace arm

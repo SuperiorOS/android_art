@@ -22,12 +22,13 @@
 #include <vector>
 
 #include "barrier.h"
+#include "base/macros.h"
 #include "base/mem_map.h"
 #include "base/mutex.h"
 
-namespace art {
+namespace art HIDDEN {
 
-class ThreadPool;
+class AbstractThreadPool;
 
 class Closure {
  public:
@@ -92,63 +93,51 @@ class ThreadPoolWorker {
   Thread* GetThread() const { return thread_; }
 
  protected:
-  ThreadPoolWorker(ThreadPool* thread_pool, const std::string& name, size_t stack_size);
+  ThreadPoolWorker(AbstractThreadPool* thread_pool, const std::string& name, size_t stack_size);
   static void* Callback(void* arg) REQUIRES(!Locks::mutator_lock_);
   virtual void Run();
 
-  ThreadPool* const thread_pool_;
+  AbstractThreadPool* const thread_pool_;
   const std::string name_;
   MemMap stack_;
   pthread_t pthread_;
   Thread* thread_;
 
  private:
-  friend class ThreadPool;
+  friend class AbstractThreadPool;
   DISALLOW_COPY_AND_ASSIGN(ThreadPoolWorker);
 };
 
 // Note that thread pool workers will set Thread#setCanCallIntoJava to false.
-class ThreadPool {
+class AbstractThreadPool {
  public:
   // Returns the number of threads in the thread pool.
   size_t GetThreadCount() const {
     return threads_.size();
   }
 
-  const std::vector<ThreadPoolWorker*>& GetWorkers();
+  EXPORT const std::vector<ThreadPoolWorker*>& GetWorkers();
 
   // Broadcast to the workers and tell them to empty out the work queue.
-  void StartWorkers(Thread* self) REQUIRES(!task_queue_lock_);
+  EXPORT void StartWorkers(Thread* self) REQUIRES(!task_queue_lock_);
 
   // Do not allow workers to grab any new tasks.
-  void StopWorkers(Thread* self) REQUIRES(!task_queue_lock_);
+  EXPORT void StopWorkers(Thread* self) REQUIRES(!task_queue_lock_);
 
   // Returns if the thread pool has started.
   bool HasStarted(Thread* self) REQUIRES(!task_queue_lock_);
 
   // Add a new task, the first available started worker will process it. Does not delete the task
   // after running it, it is the caller's responsibility.
-  void AddTask(Thread* self, Task* task) REQUIRES(!task_queue_lock_);
+  virtual void AddTask(Thread* self, Task* task) REQUIRES(!task_queue_lock_) = 0;
 
   // Remove all tasks in the queue.
-  void RemoveAllTasks(Thread* self) REQUIRES(!task_queue_lock_);
+  virtual void RemoveAllTasks(Thread* self) REQUIRES(!task_queue_lock_) = 0;
 
-  // Return whether any thread in the pool is busy, or the task queue is not empty.
-  bool IsActive(Thread* self) REQUIRES(!task_queue_lock_);
-
-  // Create a named thread pool with the given number of threads.
-  //
-  // If create_peers is true, all worker threads will have a Java peer object. Note that if the
-  // pool is asked to do work on the current thread (see Wait), a peer may not be available. Wait
-  // will conservatively abort if create_peers and do_work are true.
-  ThreadPool(const char* name,
-             size_t num_threads,
-             bool create_peers = false,
-             size_t worker_stack_size = ThreadPoolWorker::kDefaultStackSize);
-  virtual ~ThreadPool();
+  virtual size_t GetTaskCount(Thread* self) REQUIRES(!task_queue_lock_) = 0;
 
   // Create the threads of this pool.
-  void CreateThreads();
+  EXPORT void CreateThreads();
 
   // Stops and deletes all threads in this pool.
   void DeleteThreads();
@@ -156,9 +145,7 @@ class ThreadPool {
   // Wait for all tasks currently on queue to get completed. If the pool has been stopped, only
   // wait till all already running tasks are done.
   // When the pool was created with peers for workers, do_work must not be true (see ThreadPool()).
-  void Wait(Thread* self, bool do_work, bool may_hold_locks) REQUIRES(!task_queue_lock_);
-
-  size_t GetTaskCount(Thread* self) REQUIRES(!task_queue_lock_);
+  EXPORT void Wait(Thread* self, bool do_work, bool may_hold_locks) REQUIRES(!task_queue_lock_);
 
   // Returns the total amount of workers waited for tasks.
   uint64_t GetWaitTime() const {
@@ -179,22 +166,27 @@ class ThreadPool {
   // Wait for workers to be created.
   void WaitForWorkersToBeCreated();
 
+  virtual ~AbstractThreadPool() {}
+
  protected:
   // get a task to run, blocks if there are no tasks left
-  virtual Task* GetTask(Thread* self) REQUIRES(!task_queue_lock_);
+  Task* GetTask(Thread* self) REQUIRES(!task_queue_lock_);
 
   // Try to get a task, returning null if there is none available.
   Task* TryGetTask(Thread* self) REQUIRES(!task_queue_lock_);
-  Task* TryGetTaskLocked() REQUIRES(task_queue_lock_);
+  virtual Task* TryGetTaskLocked() REQUIRES(task_queue_lock_) = 0;
 
   // Are we shutting down?
   bool IsShuttingDown() const REQUIRES(task_queue_lock_) {
     return shutting_down_;
   }
 
-  bool HasOutstandingTasks() const REQUIRES(task_queue_lock_) {
-    return started_ && !tasks_.empty();
-  }
+  virtual bool HasOutstandingTasks() const REQUIRES(task_queue_lock_) = 0;
+
+  EXPORT AbstractThreadPool(const char* name,
+                            size_t num_threads,
+                            bool create_peers,
+                            size_t worker_stack_size);
 
   const std::string name_;
   Mutex task_queue_lock_;
@@ -204,7 +196,6 @@ class ThreadPool {
   volatile bool shutting_down_ GUARDED_BY(task_queue_lock_);
   // How many worker threads are waiting on the condition.
   volatile size_t waiting_count_ GUARDED_BY(task_queue_lock_);
-  std::deque<Task*> tasks_ GUARDED_BY(task_queue_lock_);
   std::vector<ThreadPoolWorker*> threads_;
   // Work balance detection.
   uint64_t start_time_ GUARDED_BY(task_queue_lock_);
@@ -217,6 +208,46 @@ class ThreadPool {
  private:
   friend class ThreadPoolWorker;
   friend class WorkStealingWorker;
+  DISALLOW_COPY_AND_ASSIGN(AbstractThreadPool);
+};
+
+class EXPORT ThreadPool : public AbstractThreadPool {
+ public:
+  // Create a named thread pool with the given number of threads.
+  //
+  // If create_peers is true, all worker threads will have a Java peer object. Note that if the
+  // pool is asked to do work on the current thread (see Wait), a peer may not be available. Wait
+  // will conservatively abort if create_peers and do_work are true.
+  static ThreadPool* Create(const char* name,
+                            size_t num_threads,
+                            bool create_peers = false,
+                            size_t worker_stack_size = ThreadPoolWorker::kDefaultStackSize) {
+    ThreadPool* pool = new ThreadPool(name, num_threads, create_peers, worker_stack_size);
+    pool->CreateThreads();
+    return pool;
+  }
+
+  void AddTask(Thread* self, Task* task) REQUIRES(!task_queue_lock_) override;
+  size_t GetTaskCount(Thread* self) REQUIRES(!task_queue_lock_) override;
+  void RemoveAllTasks(Thread* self) REQUIRES(!task_queue_lock_) override;
+  ~ThreadPool() override;
+
+ protected:
+  Task* TryGetTaskLocked() REQUIRES(task_queue_lock_) override;
+
+  bool HasOutstandingTasks() const REQUIRES(task_queue_lock_) override {
+    return started_ && !tasks_.empty();
+  }
+
+  ThreadPool(const char* name,
+             size_t num_threads,
+             bool create_peers,
+             size_t worker_stack_size)
+      : AbstractThreadPool(name, num_threads, create_peers, worker_stack_size) {}
+
+ private:
+  std::deque<Task*> tasks_ GUARDED_BY(task_queue_lock_);
+
   DISALLOW_COPY_AND_ASSIGN(ThreadPool);
 };
 

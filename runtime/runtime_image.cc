@@ -23,6 +23,7 @@
 #include "android-base/stringprintf.h"
 #include "android-base/strings.h"
 #include "arch/instruction_set.h"
+#include "arch/instruction_set_features.h"
 #include "base/arena_allocator.h"
 #include "base/arena_containers.h"
 #include "base/bit_utils.h"
@@ -38,7 +39,6 @@
 #include "class_root-inl.h"
 #include "dex/class_accessor-inl.h"
 #include "gc/space/image_space.h"
-#include "image.h"
 #include "mirror/object-inl.h"
 #include "mirror/object-refvisitor-inl.h"
 #include "mirror/object_array-alloc-inl.h"
@@ -46,12 +46,13 @@
 #include "mirror/object_array.h"
 #include "mirror/string-inl.h"
 #include "nterp_helpers.h"
-#include "oat.h"
+#include "oat/image.h"
+#include "oat/oat.h"
 #include "profile/profile_compilation_info.h"
 #include "scoped_thread_state_change-inl.h"
 #include "vdex_file.h"
 
-namespace art {
+namespace art HIDDEN {
 
 using android::base::StringPrintf;
 
@@ -603,8 +604,11 @@ class RuntimeImageHelper {
     }
 
     for (Handle<mirror::Class> cls : classes_to_write) {
-      ScopedAssertNoThreadSuspension sants("Writing class");
-      CopyClass(cls.Get());
+      {
+        ScopedAssertNoThreadSuspension sants("Writing class");
+        CopyClass(cls.Get());
+      }
+      self->AllowThreadSuspension();
     }
 
     // Relocate the type array entries. We do this now before creating image

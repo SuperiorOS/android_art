@@ -32,14 +32,18 @@ public class Main {
   // Empty methods are easy to inline anywhere.
   private static void easyToInline() {}
   private static void $inline$easyToInline() {}
+  private static void twoLevelEasyToInline() { easyToInline(); }
 
   /// CHECK-START: int Main.$noinline$testEndsWithThrow() inliner (before)
-  /// CHECK: InvokeStaticOrDirect method_name:Main.easyToInline
+  /// CHECK: InvokeStaticOrDirect method_name:Main.twoLevelEasyToInline
 
   /// CHECK-START: int Main.$noinline$testEndsWithThrow() inliner (after)
-  /// CHECK: InvokeStaticOrDirect method_name:Main.easyToInline
+  /// CHECK: InvokeStaticOrDirect method_name:Main.twoLevelEasyToInline
   static int $noinline$testEndsWithThrow() {
-    easyToInline();
+    // Use two level inlining to avoid a pattern match in the inliner.
+    // The pattern matching is deliberately done before we check if inlining is "encouraged"
+    // which includes checking if the block ends with a `throw`.
+    twoLevelEasyToInline();
     throw new Error("");
   }
 

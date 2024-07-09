@@ -293,6 +293,7 @@ art_cc_defaults {
         "dex/dex_instruction_test.cc",
         "dex/fuzzer_corpus_test.cc",
         "dex/primitive_test.cc",
+        "dex/proto_reference_test.cc",
         "dex/string_reference_test.cc",
         "dex/test_dex_file_builder_test.cc",
         "dex/type_lookup_table_test.cc",
@@ -384,7 +385,6 @@ art_cc_defaults {
         "external/dex_file_ext_test.cc",
     ],
     shared_libs: [
-        "libartbase",
         "libdexfile",
     ],
     header_libs: [
@@ -466,7 +466,6 @@ art_cc_defaults {
         "external/dex_file_supp_test.cc",
     ],
     shared_libs: [
-        "libartbase",
         "libbase",
         "libdexfile",
         "liblog",

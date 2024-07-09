@@ -43,12 +43,12 @@
 #include "dex/dex_file-inl.h"
 #include "dex/dex_file_loader.h"
 #include "dex2oat_environment_test.h"
-#include "elf_file.h"
-#include "elf_file_impl.h"
 #include "gc_root-inl.h"
 #include "intern_table-inl.h"
-#include "oat.h"
-#include "oat_file.h"
+#include "oat/elf_file.h"
+#include "oat/elf_file_impl.h"
+#include "oat/oat.h"
+#include "oat/oat_file.h"
 #include "profile/profile_compilation_info.h"
 #include "vdex_file.h"
 #include "ziparchive/zip_writer.h"
@@ -1498,7 +1498,6 @@ TEST_F(Dex2oatVerifierAbort, HardFail) {
 class Dex2oatDedupeCode : public Dex2oatTest {};
 
 TEST_F(Dex2oatDedupeCode, DedupeTest) {
-  TEST_DISABLED_FOR_RISCV64();
   // Use MyClassNatives. It has lots of native methods that will produce deduplicate-able code.
   std::unique_ptr<const DexFile> dex(OpenTestDexFile("MyClassNatives"));
   std::string out_dir = GetScratchDir();

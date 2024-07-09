@@ -32,6 +32,13 @@ class Base {
   int w2;
   int w3;
 
+  Base() {
+    // Prevent inliner from matching the code pattern when calling this constructor
+    // to test the normal inlining that builds and inserts the callee graph.
+    // (Pattern matching can merge or eliminate constructor barriers.)
+    $inline$nop();
+  }
+
   @Override
   public String toString() {
     return getClass().getName() + "(" + baseString() + ")";
@@ -40,6 +47,8 @@ class Base {
   protected String baseString() {
     return String.format("w0: %d, w1: %d, w2: %d, w3: %d", w0, w1, w2, w3);
   }
+
+  private void $inline$nop() {}
 }
 
 // This has a final field in its constructor, so there must be a field freeze

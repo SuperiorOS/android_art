@@ -151,6 +151,12 @@ public class Main {
       // Run ensureJitCompiled here since it might get GCd
       ensureJitCompiled(Transform.class, "sayHi");
       ensureJitCompiled(Transform.class, "privateSayHi");
+      // We want to make sure sayHi method gets deoptimized. So we cannot allow any runtime frames
+      // between sayHi and the run method where the transformation is happening. If the run method
+      // is interpreted there will be a runtime frame to transition from JIT to interpreted code.
+      // So ensure the run method is JITed too, so we don't loop for a long time in the hope of
+      // getting the run method JITed.
+      ensureJitCompiled(do_redefinition.getClass(), "run");
       // Clear output.
       reporter.clear();
       t.sayHi(2, reporter, () -> { reporter.accept("Not doing anything here"); });

@@ -17,9 +17,10 @@
 #ifndef ART_RUNTIME_STARTUP_COMPLETED_TASK_H_
 #define ART_RUNTIME_STARTUP_COMPLETED_TASK_H_
 
+#include "base/macros.h"
 #include "gc/task_processor.h"
 
-namespace art {
+namespace art HIDDEN {
 
 class Thread;
 

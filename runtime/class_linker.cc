@@ -90,7 +90,6 @@
 #include "gc_root-inl.h"
 #include "handle_scope-inl.h"
 #include "hidden_api.h"
-#include "image-inl.h"
 #include "imt_conflict_table.h"
 #include "imtable-inl.h"
 #include "intern_table-inl.h"
@@ -137,11 +136,12 @@
 #include "nativehelper/scoped_local_ref.h"
 #include "nterp_helpers-inl.h"
 #include "nterp_helpers.h"
-#include "oat.h"
-#include "oat_file-inl.h"
-#include "oat_file.h"
-#include "oat_file_assistant.h"
-#include "oat_file_manager.h"
+#include "oat/image-inl.h"
+#include "oat/oat.h"
+#include "oat/oat_file-inl.h"
+#include "oat/oat_file.h"
+#include "oat/oat_file_assistant.h"
+#include "oat/oat_file_manager.h"
 #include "object_lock.h"
 #include "profile/profile_compilation_info.h"
 #include "runtime.h"
@@ -158,7 +158,7 @@
 #include "verifier/verifier_deps.h"
 #include "well_known_classes.h"
 
-namespace art {
+namespace art HIDDEN {
 
 using android::base::StringPrintf;
 
@@ -2087,7 +2087,7 @@ bool ClassLinker::AddImageSpace(gc::space::ImageSpace* space,
   if (image_pointer_size_ != space->GetImageHeader().GetPointerSize()) {
     *error_msg = StringPrintf("Application image pointer size does not match runtime: %zu vs %zu",
                               static_cast<size_t>(space->GetImageHeader().GetPointerSize()),
-                              image_pointer_size_);
+                              static_cast<size_t>(image_pointer_size_));
     return false;
   }
   size_t expected_image_roots = ImageHeader::NumberOfImageRoots(app_image);
@@ -2405,10 +2405,6 @@ void ClassLinker::VisitClassRoots(RootVisitor* visitor, VisitRootFlags flags) {
   // enabling tracing requires the mutator lock, there are no race conditions here.
   const bool tracing_enabled = Trace::IsTracingEnabled();
   Thread* const self = Thread::Current();
-  // For simplicity, if there is JIT activity, we'll trace all class loaders.
-  // This prevents class unloading while a method is being compiled or is going
-  // to be compiled.
-  const bool is_jit_active = jit::Jit::IsActive(self);
   WriterMutexLock mu(self, *Locks::classlinker_classes_lock_);
   if (gUseReadBarrier) {
     // We do not track new roots for CC.
@@ -2439,11 +2435,11 @@ void ClassLinker::VisitClassRoots(RootVisitor* visitor, VisitRootFlags flags) {
     // these objects.
     UnbufferedRootVisitor root_visitor(visitor, RootInfo(kRootStickyClass));
     boot_class_table_->VisitRoots(root_visitor);
-    // If tracing is enabled or jit is active, mark all the class loaders to prevent unloading.
-    if ((flags & kVisitRootFlagClassLoader) != 0 || tracing_enabled || is_jit_active) {
+    // If tracing is enabled, then mark all the class loaders to prevent unloading.
+    if ((flags & kVisitRootFlagClassLoader) != 0 || tracing_enabled) {
       for (const ClassLoaderData& data : class_loaders_) {
         GcRoot<mirror::Object> root(GcRoot<mirror::Object>(self->DecodeJObject(data.weak_root)));
-        root.VisitRoot(visitor, RootInfo(kRootVMInternal));
+        root.VisitRootIfNonNull(visitor, RootInfo(kRootVMInternal));
       }
     }
   } else if (!gUseReadBarrier && (flags & kVisitRootFlagNewRoots) != 0) {

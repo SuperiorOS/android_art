@@ -1,10 +1,5 @@
 [
     {
-        "tests": "2247-checker-write-barrier-elimination",
-        "description": ["Disable 2247- until we fix the WBE issue."],
-        "bug": "http://b/310755375"
-    },
-    {
         "tests": "153-reference-stress",
         "description": ["Disable 153-reference-stress temporarily until a fix",
                         "arrives."],
@@ -61,12 +56,6 @@
                   "133-static-invoke-super"],
         "description": ["Tests that are timing sensitive and flaky on heavily",
                         "loaded systems."]
-    },
-    {
-        "tests": "569-checker-pattern-replacement",
-        "variant": "target",
-        "description": ["569-checker-pattern-replacement tests behaviour",
-                        "present only on host."]
     },
     {
         "tests": ["116-nodex2oat",
@@ -341,8 +330,9 @@
     },
     {
         "tests": ["000-nop",
-                  "595-profile-saving"],
-        "description": "The doesn't compile anything",
+                  "595-profile-saving",
+                  "2271-profile-inline-cache"],
+        "description": "The test doesn't compile anything",
         "env_vars": {"ART_TEST_BISECTION": "true"},
         "variant": "optimizing"
     },
@@ -515,7 +505,8 @@
             "924-threads",
             "981-dedup-original-dex",
             "1900-track-alloc",
-            "2230-profile-save-hotness"
+            "2230-profile-save-hotness",
+            "2271-profile-inline-cache"
         ],
         "description": ["Tests that require exact knowledge of the deoptimization state, the ",
                         "number of plugins and agents, or breaks other openjdkjvmti assumptions."],
@@ -950,7 +941,6 @@
           "593-checker-shift-and-simplifier",
           "594-invoke-super",
           "595-error-class",
-          "595-profile-saving",
           "596-app-images",
           "596-checker-dead-phi",
           "596-monitor-inflation",
@@ -1152,6 +1142,7 @@
     {
         "tests": ["178-app-image-native-method",
                   "530-checker-peel-unroll",
+                  "595-profile-saving",
                   "616-cha-unloading",
                   "674-hiddenapi",
                   "677-fsi2",
@@ -1241,10 +1232,12 @@
                   "2238-checker-polymorphic-recursive-inlining",
                   "2240-tracing-non-invokable-method",
                   "2246-trace-stream",
+                  "2246-trace-v2",
                   "2254-class-value-before-and-after-u",
                   "2261-badcleaner-in-systemcleaner",
                   "2263-method-trace-jit",
-                  "2270-mh-internal-hiddenapi-use"],
+                  "2270-mh-internal-hiddenapi-use",
+                  "2271-profile-inline-cache"],
         "variant": "jvm",
         "description": ["Doesn't run on RI."]
     },
@@ -1570,5 +1563,24 @@
         "description": "ASAN issue.",
         "variant": "host",
         "env_vars": {"SANITIZE_HOST": "address"}
+    },
+    {
+      "tests": ["2271-profile-inline-cache"],
+      "variant": "jit-on-first-use | debuggable | trace |  stream",
+      "description": ["Test relies on profiling done by baseline compiled code. Meanwhile, it",
+                      "can't use --baseline because it has a test case checking the behavior when",
+                      "a method is optimized compiled."]
+    },
+    {
+      "tests": ["004-ThreadStress",
+                "050-sync-test",
+                "083-compiler-regressions",
+                "137-cfi",
+                "913-heaps",
+                "2043-reference-pauses",
+                "2239-varhandle-perf"],
+      "bug": "b/328023607",
+      "description": ["Fails on QEMU"],
+      "env_vars": {"ART_TEST_ON_VM": "true"}
     }
 ]

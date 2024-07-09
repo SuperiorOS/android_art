@@ -29,12 +29,12 @@
 #include "base/systrace.h"
 #include "gc/allocator/art-dlmalloc.h"
 #include "jit/jit_scoped_code_cache_write.h"
-#include "oat_quick_method_header.h"
+#include "oat/oat_quick_method_header.h"
 #include "palette/palette.h"
 
 using android::base::unique_fd;
 
-namespace art {
+namespace art HIDDEN {
 namespace jit {
 
 // Data cache will be half of the capacity

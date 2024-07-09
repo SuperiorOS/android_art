@@ -29,13 +29,13 @@
 #include "mirror/class_ext.h"
 #include "mirror/proxy.h"
 #include "nativehelper/scoped_local_ref.h"
-#include "oat_file.h"
+#include "oat/oat_file.h"
 #include "scoped_thread_state_change.h"
 #include "stack.h"
 #include "thread-inl.h"
 #include "well_known_classes.h"
 
-namespace art {
+namespace art HIDDEN {
 namespace hiddenapi {
 
 // Should be the same as dalvik.system.VMRuntime.HIDE_MAXTARGETSDK_P_HIDDEN_APIS,

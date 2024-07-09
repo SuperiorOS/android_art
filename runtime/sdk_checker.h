@@ -20,9 +20,10 @@
 #include "art_field.h"
 #include "art_method.h"
 #include "base/locks.h"
+#include "base/macros.h"
 #include "dex/dex_file.h"
 
-namespace art {
+namespace art HIDDEN {
 
 /**
  * The SdkChecker verifies if a given symbol is present in a given classpath.
@@ -43,7 +44,7 @@ class SdkChecker {
   // format is the same as the classpath format (e.g. `dex1:dex2:dex3`). The
   // method will attempt to open the dex files and if there are errors it will
   // return a nullptr and set the error_msg appropriately.
-  static SdkChecker* Create(const std::string& public_sdk, std::string* error_msg);
+  EXPORT static SdkChecker* Create(const std::string& public_sdk, std::string* error_msg);
 
   // Verify if it should deny access to the given methods.
   // The decision is based on whether or not any of the API dex files declares a method

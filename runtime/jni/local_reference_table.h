@@ -39,7 +39,7 @@
 #include "obj_ptr.h"
 #include "offsets.h"
 
-namespace art {
+namespace art HIDDEN {
 
 class RootInfo;
 
@@ -80,13 +80,9 @@ namespace jni {
 // should satisfy JNI requirements (e.g. EnsureLocalCapacity).
 
 // To get the desired behavior for JNI locals, we need to know the bottom and top of the current
-// "segment". The top is managed internally, and the bottom is passed in as a function argument.
-// When we call a native method or push a local frame, the current top index gets pushed on, and
-// serves as the new bottom. When we pop a frame off, the value from the stack becomes the new top
-// index, and the value stored in the previous frame becomes the new bottom.
-// TODO: Move the bottom index from `JniEnvExt` to the `LocalReferenceTable`. Use this in the JNI
-// compiler to improve the emitted local frame push/pop code by using two-register loads/stores
-// where available (LDRD/STRD on arm, LDP/STP on arm64).
+// "segment". When we call a native method or push a local frame, the current top index gets pushed
+// on, and serves as the new bottom. When we pop a frame off, the value from the stack becomes the
+// new top index, and the value stored in the previous frame becomes the new bottom.
 //
 // If we delete entries from the middle of the list, we will be left with "holes" which we track
 // with a singly-linked list, so that they can be reused quickly. After a segment has been removed,
@@ -227,7 +223,14 @@ class SmallLrtAllocator {
   void Deallocate(LrtEntry* unneeded, size_t size) REQUIRES(!lock_);
 
  private:
-  static size_t GetIndex(size_t size);
+  // Number of free lists in the allocator.
+#ifdef ART_PAGE_SIZE_AGNOSTIC
+  const size_t num_lrt_slots_ = (WhichPowerOf2(gPageSize / kInitialLrtBytes));
+#else
+  static constexpr size_t num_lrt_slots_ = (WhichPowerOf2(gPageSize / kInitialLrtBytes));
+#endif
+
+  size_t GetIndex(size_t size);
 
   // Free lists of small chunks linked through the first word.
   dchecked_vector<void*> free_lists_;
@@ -265,9 +268,7 @@ class LocalReferenceTable {
 
   // Add a new entry. The `obj` must be a valid non-null object reference. This function
   // will return null if an error happened (with an appropriate error message set).
-  IndirectRef Add(LRTSegmentState previous_state,
-                  ObjPtr<mirror::Object> obj,
-                  std::string* error_msg)
+  EXPORT IndirectRef Add(ObjPtr<mirror::Object> obj, std::string* error_msg)
       REQUIRES_SHARED(Locks::mutator_lock_);
 
   // Given an `IndirectRef` in the table, return the `Object` it refers to.
@@ -289,7 +290,7 @@ class LocalReferenceTable {
   // required by JNI's DeleteLocalRef function.
   //
   // Returns "false" if nothing was removed.
-  bool Remove(LRTSegmentState previous_state, IndirectRef iref)
+  bool Remove(IndirectRef iref)
       REQUIRES_SHARED(Locks::mutator_lock_);
 
   void AssertEmpty();
@@ -323,20 +324,38 @@ class LocalReferenceTable {
   // without recovering holes. Thus this is a conservative estimate.
   size_t FreeCapacity() const;
 
-  void VisitRoots(RootVisitor* visitor, const RootInfo& root_info)
+  EXPORT void VisitRoots(RootVisitor* visitor, const RootInfo& root_info)
       REQUIRES_SHARED(Locks::mutator_lock_);
 
-  LRTSegmentState GetSegmentState() const {
-    return segment_state_;
+  LRTSegmentState PushFrame() {
+    if (kDebugLRT) {
+      LOG(INFO) << "+++ Push frame: previous state " << previous_state_.top_index << " -> "
+                << segment_state_.top_index;
+    }
+    LRTSegmentState result = previous_state_;
+    previous_state_ = segment_state_;
+    return result;
   }
 
-  void SetSegmentState(LRTSegmentState new_state);
+  void PopFrame(LRTSegmentState previous_state) {
+    if (kDebugLRT) {
+      LOG(INFO) << "+++ Pop frame: current state " << segment_state_.top_index << " -> "
+                << previous_state_.top_index << ", previous state -> " << previous_state.top_index;
+    }
+    segment_state_ = previous_state_;
+    previous_state_ = previous_state;
+  }
 
-  static Offset SegmentStateOffset([[maybe_unused]] size_t pointer_size) {
-    // Note: Currently segment_state_ is at offset 0. We're testing the expected value in
-    //       jni_internal_test to make sure it stays correct. It is not OFFSETOF_MEMBER, as that
-    //       is not pointer-size-safe.
-    return Offset(0);
+  static MemberOffset PreviousStateOffset() {
+    // Note: The `previous_state_` must be before any pointer-size-dependent members, so that
+    // `MEMBER_OFFSET()` gives the correct value even for cross-compilation.
+    return MemberOffset(OFFSETOF_MEMBER(LocalReferenceTable, previous_state_));
+  }
+
+  static MemberOffset SegmentStateOffset() {
+    // Note: The `segment_state_` must be before any pointer-size-dependent members, so that
+    // `MEMBER_OFFSET()` gives the correct value even for cross-compilation.
+    return MemberOffset(OFFSETOF_MEMBER(LocalReferenceTable, segment_state_));
   }
 
   // Release pages past the end of the table that may have previously held references.
@@ -347,6 +366,8 @@ class LocalReferenceTable {
       REQUIRES_SHARED(Locks::mutator_lock_);
 
  private:
+  static constexpr bool kDebugLRT = false;
+
   // Flags and fields in the `free_entries_list_`.
   static constexpr size_t kFlagCheckJni = 0u;
   // Skip a bit to have the same value range for the "first free" as the "next free" in `LrtEntry`.
@@ -456,6 +477,9 @@ class LocalReferenceTable {
   void VisitRootsInternal(Visitor&& visitor) const REQUIRES_SHARED(Locks::mutator_lock_);
 
   /// semi-public - read/write by jni down calls.
+  // These two members need to be before any pointer-size-dependent members, so that
+  // `MEMBER_OFFSET()` gives the correct value even for cross-compilation.
+  LRTSegmentState previous_state_;
   LRTSegmentState segment_state_;
 
   // The maximum number of entries (modulo resizing).

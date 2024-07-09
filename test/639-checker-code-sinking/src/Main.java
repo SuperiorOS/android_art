@@ -17,8 +17,14 @@
 public class Main {
   static class ValueHolder {
     int getValue() {
+      // Prevent inliner from matching the code pattern when calling this method to test
+      // the normal inlining path that does not inline in blocks that end with a `throw`.
+      $inline$nop();
+
       return 1;
     }
+
+    private void $inline$nop() {}
   }
 
   public static void main(String[] args) throws Exception {

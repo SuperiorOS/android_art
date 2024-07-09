@@ -18,6 +18,8 @@
 
 #include "entrypoints/quick/quick_entrypoints.h"
 #include "indirect_reference_table.h"
+#include "jni/jni_env_ext.h"
+#include "jni/local_reference_table.h"
 #include "lock_word.h"
 #include "managed_register_arm64.h"
 #include "offsets.h"
@@ -797,7 +799,7 @@ void Arm64JNIMacroAssembler::DeliverPendingException() {
 }
 
 std::unique_ptr<JNIMacroLabel> Arm64JNIMacroAssembler::CreateLabel() {
-  return std::unique_ptr<JNIMacroLabel>(new Arm64JNIMacroLabel());
+  return std::unique_ptr<JNIMacroLabel>(new (asm_.GetAllocator()) Arm64JNIMacroLabel());
 }
 
 void Arm64JNIMacroAssembler::Jump(JNIMacroLabel* label) {
@@ -977,6 +979,39 @@ void Arm64JNIMacroAssembler::RemoveFrame(size_t frame_size,
   // The CFI should be restored for any code that follows the exit block.
   cfi().RestoreState();
   cfi().DefCFAOffset(frame_size);
+}
+
+void Arm64JNIMacroAssembler::LoadLocalReferenceTableStates(ManagedRegister jni_env_reg,
+                                                           ManagedRegister previous_state_reg,
+                                                           ManagedRegister current_state_reg) {
+  constexpr size_t kLRTSegmentStateSize = sizeof(jni::LRTSegmentState);
+  DCHECK_EQ(kLRTSegmentStateSize, kWRegSizeInBytes);
+  const MemberOffset previous_state_offset = JNIEnvExt::LrtPreviousStateOffset(kArm64PointerSize);
+  const MemberOffset current_state_offset = JNIEnvExt::LrtSegmentStateOffset(kArm64PointerSize);
+  DCHECK_EQ(previous_state_offset.SizeValue() + kLRTSegmentStateSize,
+            current_state_offset.SizeValue());
+
+  ___ Ldp(
+      reg_w(previous_state_reg.AsArm64().AsWRegister()),
+      reg_w(current_state_reg.AsArm64().AsWRegister()),
+      MemOperand(reg_x(jni_env_reg.AsArm64().AsXRegister()), previous_state_offset.Int32Value()));
+}
+
+void Arm64JNIMacroAssembler::StoreLocalReferenceTableStates(ManagedRegister jni_env_reg,
+                                                            ManagedRegister previous_state_reg,
+                                                            ManagedRegister current_state_reg) {
+  constexpr size_t kLRTSegmentStateSize = sizeof(jni::LRTSegmentState);
+  DCHECK_EQ(kLRTSegmentStateSize, kWRegSizeInBytes);
+  const MemberOffset previous_state_offset = JNIEnvExt::LrtPreviousStateOffset(kArm64PointerSize);
+  const MemberOffset current_state_offset = JNIEnvExt::LrtSegmentStateOffset(kArm64PointerSize);
+  DCHECK_EQ(previous_state_offset.SizeValue() + kLRTSegmentStateSize,
+            current_state_offset.SizeValue());
+
+  // Set the current segment state together with restoring the cookie.
+  ___ Stp(
+      reg_w(previous_state_reg.AsArm64().AsWRegister()),
+      reg_w(current_state_reg.AsArm64().AsWRegister()),
+      MemOperand(reg_x(jni_env_reg.AsArm64().AsXRegister()), previous_state_offset.Int32Value()));
 }
 
 #undef ___

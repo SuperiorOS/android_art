@@ -38,9 +38,53 @@
 #include "thread-current-inl.h"
 #include "thread_list.h"
 
-namespace art {
+namespace art HIDDEN {
 namespace gc {
 namespace collector {
+
+namespace {
+
+// Report a GC metric via the ATrace interface.
+void TraceGCMetric(const char* name, int64_t value) {
+  // ART's interface with systrace (through libartpalette) only supports
+  // reporting 32-bit (signed) integer values at the moment. Upon
+  // underflows/overflows, clamp metric values at `int32_t` min/max limits and
+  // report these events via a corresponding underflow/overflow counter; also
+  // log a warning about the first underflow/overflow occurrence.
+  //
+  // TODO(b/300015145): Consider extending libarpalette to allow reporting this
+  // value as a 64-bit (signed) integer (instead of a 32-bit (signed) integer).
+  // Note that this is likely unnecessary at the moment (November 2023) for any
+  // size-related GC metric, given the maximum theoretical size of a managed
+  // heap (4 GiB).
+  if (UNLIKELY(value < std::numeric_limits<int32_t>::min())) {
+    ATraceIntegerValue(name, std::numeric_limits<int32_t>::min());
+    std::string underflow_counter_name = std::string(name) + " int32_t underflow";
+    ATraceIntegerValue(underflow_counter_name.c_str(), 1);
+    static bool int32_underflow_reported = false;
+    if (!int32_underflow_reported) {
+      LOG(WARNING) << "GC Metric \"" << name << "\" with value " << value
+                   << " causing a 32-bit integer underflow";
+      int32_underflow_reported = true;
+    }
+    return;
+  }
+  if (UNLIKELY(value > std::numeric_limits<int32_t>::max())) {
+    ATraceIntegerValue(name, std::numeric_limits<int32_t>::max());
+    std::string overflow_counter_name = std::string(name) + " int32_t overflow";
+    ATraceIntegerValue(overflow_counter_name.c_str(), 1);
+    static bool int32_overflow_reported = false;
+    if (!int32_overflow_reported) {
+      LOG(WARNING) << "GC Metric \"" << name << "\" with value " << value
+                   << " causing a 32-bit integer overflow";
+      int32_overflow_reported = true;
+    }
+    return;
+  }
+  ATraceIntegerValue(name, value);
+}
+
+}  // namespace
 
 Iteration::Iteration()
     : duration_ns_(0), timings_("GC iteration timing logger", true, VLOG_IS_ON(heap)) {
@@ -124,13 +168,13 @@ uint64_t GarbageCollector::ExtractRssFromMincore(
     }
     size_t length = static_cast<uint8_t*>(it->second) - static_cast<uint8_t*>(it->first);
     // Compute max length for vector allocation later.
-    vec_len = std::max(vec_len, length / gPageSize);
+    vec_len = std::max(vec_len, DivideByPageSize(length));
   }
   std::unique_ptr<unsigned char[]> vec(new unsigned char[vec_len]);
   for (const auto it : *gc_ranges) {
     size_t length = static_cast<uint8_t*>(it.second) - static_cast<uint8_t*>(it.first);
     if (mincore(it.first, length, vec.get()) == 0) {
-      for (size_t i = 0; i < length / gPageSize; i++) {
+      for (size_t i = 0; i < DivideByPageSize(length); i++) {
         // Least significant bit represents residency of a page. Other bits are
         // reserved.
         rss += vec[i] & 0x1;
@@ -225,6 +269,12 @@ void GarbageCollector::Run(GcCause gc_cause, bool clear_soft_references) {
     gc_duration_->Add(NsToMs(current_iteration->GetDurationNs()));
     gc_duration_delta_->Add(NsToMs(current_iteration->GetDurationNs()));
   }
+
+  // Report some metrics via the ATrace interface, to surface them in Perfetto.
+  TraceGCMetric("freed_normal_object_bytes", current_iteration->GetFreedBytes());
+  TraceGCMetric("freed_large_object_bytes", current_iteration->GetFreedLargeObjectBytes());
+  TraceGCMetric("freed_bytes", freed_bytes);
+
   is_transaction_active_ = false;
 }
 

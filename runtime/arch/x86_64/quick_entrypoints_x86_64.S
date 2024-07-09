@@ -918,6 +918,8 @@ MACRO1(ALLOC_ARRAY_TLAB_FAST_PATH_RESOLVED_WITH_SIZE, slowPathLabel)
     movq %gs:THREAD_SELF_OFFSET, %rcx                          // rcx = thread
     // Mask out the unaligned part to make sure we are 8 byte aligned.
     andq LITERAL(OBJECT_ALIGNMENT_MASK_TOGGLED64), %r9
+    cmpq LITERAL(MIN_LARGE_OBJECT_THRESHOLD), %r9              // Possibly a large object.
+    jae  RAW_VAR(slowPathLabel)                                // Go to slow path if large object
     movq THREAD_LOCAL_POS_OFFSET(%rcx), %rax
     addq %rax, %r9
     cmpq THREAD_LOCAL_END_OFFSET(%rcx), %r9                    // Check if it fits.
@@ -967,7 +969,7 @@ MACRO0(COMPUTE_ARRAY_SIZE_UNKNOWN)
     movl MIRROR_CLASS_COMPONENT_TYPE_OFFSET(%rdi), %ecx        // Load component type.
     UNPOISON_HEAP_REF ecx
     movl MIRROR_CLASS_OBJECT_PRIMITIVE_TYPE_OFFSET(%rcx), %ecx // Load primitive type.
-    shrq MACRO_LITERAL(PRIMITIVE_TYPE_SIZE_SHIFT_SHIFT), %rcx        // Get component size shift.
+    shrq MACRO_LITERAL(PRIMITIVE_TYPE_SIZE_SHIFT_SHIFT), %rcx  // Get component size shift.
     movq %rsi, %r9
     salq %cl, %r9                                              // Calculate array count shifted.
     // Add array header + alignment rounding.

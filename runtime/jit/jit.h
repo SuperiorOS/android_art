@@ -17,28 +17,30 @@
 #ifndef ART_RUNTIME_JIT_JIT_H_
 #define ART_RUNTIME_JIT_JIT_H_
 
+#include <unordered_set>
+
 #include <android-base/unique_fd.h>
 
 #include "base/histogram-inl.h"
 #include "base/macros.h"
 #include "base/mutex.h"
-#include "base/runtime_debug.h"
 #include "base/timing_logger.h"
 #include "compilation_kind.h"
 #include "handle.h"
 #include "offsets.h"
 #include "interpreter/mterp/nterp.h"
 #include "jit/debugger_interface.h"
-#include "jit/profile_saver_options.h"
+#include "jit_options.h"
 #include "obj_ptr.h"
 #include "thread_pool.h"
 
-namespace art {
+namespace art HIDDEN {
 
 class ArtMethod;
 class ClassLinker;
 class DexFile;
 class OatDexFile;
+class RootVisitor;
 struct RuntimeArgumentMap;
 union JValue;
 
@@ -59,130 +61,6 @@ class JitOptions;
 
 static constexpr int16_t kJitCheckForOSR = -1;
 static constexpr int16_t kJitHotnessDisabled = -2;
-// At what priority to schedule jit threads. 9 is the lowest foreground priority on device.
-// See android/os/Process.java.
-static constexpr int kJitPoolThreadPthreadDefaultPriority = 9;
-// At what priority to schedule jit zygote threads compiling profiles in the background.
-// 19 is the lowest background priority on device.
-// See android/os/Process.java.
-static constexpr int kJitZygotePoolThreadPthreadDefaultPriority = 19;
-
-class JitOptions {
- public:
-  static JitOptions* CreateFromRuntimeArguments(const RuntimeArgumentMap& options);
-
-  uint16_t GetOptimizeThreshold() const {
-    return optimize_threshold_;
-  }
-
-  uint16_t GetWarmupThreshold() const {
-    return warmup_threshold_;
-  }
-
-  uint16_t GetPriorityThreadWeight() const {
-    return priority_thread_weight_;
-  }
-
-  uint16_t GetInvokeTransitionWeight() const {
-    return invoke_transition_weight_;
-  }
-
-  size_t GetCodeCacheInitialCapacity() const {
-    return code_cache_initial_capacity_;
-  }
-
-  size_t GetCodeCacheMaxCapacity() const {
-    return code_cache_max_capacity_;
-  }
-
-  bool DumpJitInfoOnShutdown() const {
-    return dump_info_on_shutdown_;
-  }
-
-  const ProfileSaverOptions& GetProfileSaverOptions() const {
-    return profile_saver_options_;
-  }
-
-  bool GetSaveProfilingInfo() const {
-    return profile_saver_options_.IsEnabled();
-  }
-
-  int GetThreadPoolPthreadPriority() const {
-    return thread_pool_pthread_priority_;
-  }
-
-  int GetZygoteThreadPoolPthreadPriority() const {
-    return zygote_thread_pool_pthread_priority_;
-  }
-
-  bool UseJitCompilation() const {
-    return use_jit_compilation_;
-  }
-
-  bool UseProfiledJitCompilation() const {
-    return use_profiled_jit_compilation_;
-  }
-
-  void SetUseJitCompilation(bool b) {
-    use_jit_compilation_ = b;
-  }
-
-  void SetSaveProfilingInfo(bool save_profiling_info) {
-    profile_saver_options_.SetEnabled(save_profiling_info);
-  }
-
-  void SetWaitForJitNotificationsToSaveProfile(bool value) {
-    profile_saver_options_.SetWaitForJitNotificationsToSave(value);
-  }
-
-  void SetJitAtFirstUse() {
-    use_jit_compilation_ = true;
-    optimize_threshold_ = 0;
-  }
-
-  void SetUseBaselineCompiler() {
-    use_baseline_compiler_ = true;
-  }
-
-  bool UseBaselineCompiler() const {
-    return use_baseline_compiler_;
-  }
-
- private:
-  // We add the sample in batches of size kJitSamplesBatchSize.
-  // This method rounds the threshold so that it is multiple of the batch size.
-  static uint32_t RoundUpThreshold(uint32_t threshold);
-
-  bool use_jit_compilation_;
-  bool use_profiled_jit_compilation_;
-  bool use_baseline_compiler_;
-  size_t code_cache_initial_capacity_;
-  size_t code_cache_max_capacity_;
-  uint32_t optimize_threshold_;
-  uint32_t warmup_threshold_;
-  uint16_t priority_thread_weight_;
-  uint16_t invoke_transition_weight_;
-  bool dump_info_on_shutdown_;
-  int thread_pool_pthread_priority_;
-  int zygote_thread_pool_pthread_priority_;
-  ProfileSaverOptions profile_saver_options_;
-
-  JitOptions()
-      : use_jit_compilation_(false),
-        use_profiled_jit_compilation_(false),
-        use_baseline_compiler_(false),
-        code_cache_initial_capacity_(0),
-        code_cache_max_capacity_(0),
-        optimize_threshold_(0),
-        warmup_threshold_(0),
-        priority_thread_weight_(0),
-        invoke_transition_weight_(0),
-        dump_info_on_shutdown_(false),
-        thread_pool_pthread_priority_(kJitPoolThreadPthreadDefaultPriority),
-        zygote_thread_pool_pthread_priority_(kJitZygotePoolThreadPthreadDefaultPriority) {}
-
-  DISALLOW_COPY_AND_ASSIGN(JitOptions);
-};
 
 // Implemented and provided by the compiler library.
 class JitCompilerInterface {
@@ -197,6 +75,7 @@ class JitCompilerInterface {
   virtual void ParseCompilerOptions() = 0;
   virtual bool IsBaselineCompiler() const = 0;
   virtual void SetDebuggableCompilerOption(bool value) = 0;
+  virtual uint32_t GetInlineMaxCodeUnits() const = 0;
 
   virtual std::vector<uint8_t> PackElfFileForJIT(ArrayRef<const JITCodeEntry*> elf_files,
                                                  ArrayRef<const void*> removed_symbols,
@@ -228,25 +107,93 @@ struct OsrData {
   }
 };
 
+/**
+ * A customized thread pool for the JIT, to prioritize compilation kinds, and
+ * simplify root visiting.
+ */
+class JitThreadPool : public AbstractThreadPool {
+ public:
+  static JitThreadPool* Create(const char* name,
+                               size_t num_threads,
+                               size_t worker_stack_size = ThreadPoolWorker::kDefaultStackSize) {
+    JitThreadPool* pool = new JitThreadPool(name, num_threads, worker_stack_size);
+    pool->CreateThreads();
+    return pool;
+  }
+
+  // Add a task to the generic queue. This is for tasks like
+  // ZygoteVerificationTask, or JitCompileTask for precompile.
+  void AddTask(Thread* self, Task* task) REQUIRES(!task_queue_lock_) override;
+  size_t GetTaskCount(Thread* self) REQUIRES(!task_queue_lock_) override;
+  void RemoveAllTasks(Thread* self) REQUIRES(!task_queue_lock_) override;
+  ~JitThreadPool() override;
+
+  // Remove the task from the list of compiling tasks.
+  void Remove(JitCompileTask* task) REQUIRES(!task_queue_lock_);
+
+  // Add a custom compilation task in the right queue.
+  void AddTask(Thread* self, ArtMethod* method, CompilationKind kind) REQUIRES(!task_queue_lock_);
+
+  // Visit the ArtMethods stored in the various queues.
+  void VisitRoots(RootVisitor* visitor);
+
+ protected:
+  Task* TryGetTaskLocked() REQUIRES(task_queue_lock_) override;
+
+  bool HasOutstandingTasks() const REQUIRES(task_queue_lock_) override {
+    return started_ &&
+        (!generic_queue_.empty() ||
+         !baseline_queue_.empty() ||
+         !optimized_queue_.empty() ||
+         !osr_queue_.empty());
+  }
+
+ private:
+  JitThreadPool(const char* name,
+                size_t num_threads,
+                size_t worker_stack_size)
+      // We need peers as we may report the JIT thread, e.g., in the debugger.
+      : AbstractThreadPool(name, num_threads, /* create_peers= */ true, worker_stack_size) {}
+
+  // Try to fetch an entry from `methods`. Return null if `methods` is empty.
+  Task* FetchFrom(std::deque<ArtMethod*>& methods, CompilationKind kind) REQUIRES(task_queue_lock_);
+
+  std::deque<Task*> generic_queue_ GUARDED_BY(task_queue_lock_);
+
+  std::deque<ArtMethod*> osr_queue_ GUARDED_BY(task_queue_lock_);
+  std::deque<ArtMethod*> baseline_queue_ GUARDED_BY(task_queue_lock_);
+  std::deque<ArtMethod*> optimized_queue_ GUARDED_BY(task_queue_lock_);
+
+  // We track the methods that are currently enqueued to avoid
+  // adding them to the queue multiple times, which could bloat the
+  // queues.
+  std::set<ArtMethod*> osr_enqueued_methods_ GUARDED_BY(task_queue_lock_);
+  std::set<ArtMethod*> baseline_enqueued_methods_ GUARDED_BY(task_queue_lock_);
+  std::set<ArtMethod*> optimized_enqueued_methods_ GUARDED_BY(task_queue_lock_);
+
+  // A set to keep track of methods that are currently being compiled. Entries
+  // will be removed when JitCompileTask->Finalize is called.
+  std::unordered_set<JitCompileTask*> current_compilations_ GUARDED_BY(task_queue_lock_);
+
+  DISALLOW_COPY_AND_ASSIGN(JitThreadPool);
+};
+
 class Jit {
  public:
-  static constexpr size_t kDefaultPriorityThreadWeightRatio = 1000;
-  static constexpr size_t kDefaultInvokeTransitionWeightRatio = 500;
   // How frequently should the interpreter check to see if OSR compilation is ready.
   static constexpr int16_t kJitRecheckOSRThreshold = 101;  // Prime number to avoid patterns.
-
-  DECLARE_RUNTIME_DEBUG_FLAG(kSlowMode);
 
   virtual ~Jit();
 
   // Create JIT itself.
   static std::unique_ptr<Jit> Create(JitCodeCache* code_cache, JitOptions* options);
 
-  // Return whether any JIT thread is busy compiling, or the task queue is not empty.
-  static bool IsActive(Thread* self);
+  EXPORT bool CompileMethod(ArtMethod* method,
+                            Thread* self,
+                            CompilationKind compilation_kind,
+                            bool prejit) REQUIRES_SHARED(Locks::mutator_lock_);
 
-  bool CompileMethod(ArtMethod* method, Thread* self, CompilationKind compilation_kind, bool prejit)
-      REQUIRES_SHARED(Locks::mutator_lock_);
+  void VisitRoots(RootVisitor* visitor);
 
   const JitCodeCache* GetCodeCache() const {
     return code_cache_;
@@ -305,7 +252,7 @@ class Jit {
   }
 
   // Wait until there is no more pending compilation tasks.
-  void WaitForCompilationToFinish(Thread* self);
+  EXPORT void WaitForCompilationToFinish(Thread* self);
 
   // Profiling methods.
   void MethodEntered(Thread* thread, ArtMethod* method)
@@ -346,7 +293,7 @@ class Jit {
   void DumpTypeInfoForLoadedTypes(ClassLinker* linker);
 
   // Return whether we should try to JIT compiled code as soon as an ArtMethod is invoked.
-  bool JitAtFirstUse();
+  EXPORT bool JitAtFirstUse();
 
   // Return whether we can invoke JIT code for `method`.
   bool CanInvokeCompiledCode(ArtMethod* method);
@@ -367,21 +314,21 @@ class Jit {
                                         JValue* result)
       REQUIRES_SHARED(Locks::mutator_lock_);
 
-  ThreadPool* GetThreadPool() const {
+  JitThreadPool* GetThreadPool() const {
     return thread_pool_.get();
   }
 
   // Stop the JIT by waiting for all current compilations and enqueued compilations to finish.
-  void Stop();
+  EXPORT void Stop();
 
   // Start JIT threads.
-  void Start();
+  EXPORT void Start();
 
   // Transition to a child state.
-  void PostForkChildAction(bool is_system_server, bool is_zygote);
+  EXPORT void PostForkChildAction(bool is_system_server, bool is_zygote);
 
   // Prepare for forking.
-  void PreZygoteFork();
+  EXPORT void PreZygoteFork();
 
   // Adjust state after forking.
   void PostZygoteFork();
@@ -438,9 +385,12 @@ class Jit {
   // class path methods.
   void NotifyZygoteCompilationDone();
 
-  void EnqueueOptimizedCompilation(ArtMethod* method, Thread* self);
+  EXPORT void EnqueueOptimizedCompilation(ArtMethod* method, Thread* self);
 
-  void MaybeEnqueueCompilation(ArtMethod* method, Thread* self)
+  EXPORT void MaybeEnqueueCompilation(ArtMethod* method, Thread* self)
+      REQUIRES_SHARED(Locks::mutator_lock_);
+
+  EXPORT static bool TryPatternMatch(ArtMethod* method, CompilationKind compilation_kind)
       REQUIRES_SHARED(Locks::mutator_lock_);
 
  private:
@@ -465,8 +415,7 @@ class Jit {
 
   void AddCompileTask(Thread* self,
                       ArtMethod* method,
-                      CompilationKind compilation_kind,
-                      bool precompile = false);
+                      CompilationKind compilation_kind);
 
   bool CompileMethodInternal(ArtMethod* method,
                              Thread* self,
@@ -475,13 +424,13 @@ class Jit {
       REQUIRES_SHARED(Locks::mutator_lock_);
 
   // JIT compiler
-  static JitCompilerInterface* jit_compiler_;
+  EXPORT static JitCompilerInterface* jit_compiler_;
 
   // JIT resources owned by runtime.
   jit::JitCodeCache* const code_cache_;
   const JitOptions* const options_;
 
-  std::unique_ptr<ThreadPool> thread_pool_;
+  std::unique_ptr<JitThreadPool> thread_pool_;
   std::vector<std::unique_ptr<OatDexFile>> type_lookup_tables_;
 
   Mutex boot_completed_lock_;
@@ -523,7 +472,7 @@ class Jit {
 };
 
 // Helper class to stop the JIT for a given scope. This will wait for the JIT to quiesce.
-class ScopedJitSuspend {
+class EXPORT ScopedJitSuspend {
  public:
   ScopedJitSuspend();
   ~ScopedJitSuspend();

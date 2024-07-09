@@ -787,8 +787,8 @@ class DexFile {
   // Returns false if there is no debugging information or if it cannot be decoded.
   template<typename DexDebugNewPosition, typename IndexToStringData>
   static bool DecodeDebugPositionInfo(const uint8_t* stream,
-                                      const IndexToStringData& index_to_string_data,
-                                      const DexDebugNewPosition& position_functor);
+                                      IndexToStringData&& index_to_string_data,
+                                      DexDebugNewPosition&& position_functor);
 
   const char* GetSourceFile(const dex::ClassDef& class_def) const {
     if (!class_def.source_file_idx_.IsValid()) {
@@ -893,7 +893,7 @@ class DexFile {
 
   template <typename Visitor>
   static uint32_t DecodeDebugInfoParameterNames(const uint8_t** debug_info,
-                                                const Visitor& visitor);
+                                                Visitor&& visitor);
 
   static inline bool StringEquals(const DexFile* df1, dex::StringIndex sidx1,
                                   const DexFile* df2, dex::StringIndex sidx2);
@@ -935,7 +935,17 @@ class DexFile {
   // This is different to the "data section" in the standard dex header.
   ArrayRef<const uint8_t> const data_;
 
-  // Typically the dex file name when available, alternatively some identifying string.
+  // The full absolute path to the dex file, if it was loaded from disk.
+  //
+  // Can also be a path to a multidex container (typically apk), followed by
+  // DexFileLoader.kMultiDexSeparator (i.e. '!') and the file inside the
+  // container.
+  //
+  // On host this may not be an absolute path.
+  //
+  // On device libnativeloader uses this to determine the location of the java
+  // package or shared library, which decides where to load native libraries
+  // from.
   //
   // The ClassLinker will use this to match DexFiles the boot class
   // path to DexCache::GetLocation when loading from an image.

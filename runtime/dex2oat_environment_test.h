@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "base/file_utils.h"
+#include "base/macros.h"
 #include "base/os.h"
 #include "base/stl_util.h"
 #include "base/utils.h"
@@ -34,11 +35,11 @@
 #include "gc/heap.h"
 #include "gc/space/image_space.h"
 #include "gtest/gtest.h"
-#include "oat_file_assistant.h"
+#include "oat/oat_file_assistant.h"
 #include "runtime.h"
 #include "ziparchive/zip_writer.h"
 
-namespace art {
+namespace art HIDDEN {
 
 static constexpr bool kDebugArgs = false;
 

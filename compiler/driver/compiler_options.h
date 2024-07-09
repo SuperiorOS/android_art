@@ -60,13 +60,16 @@ enum class ProfileMethodsCheck : uint8_t {
 
 class CompilerOptions final {
  public:
-  // Guide heuristics to determine whether to compile method if profile data not available.
-  static const size_t kDefaultHugeMethodThreshold = 10000;
-  static const size_t kDefaultLargeMethodThreshold = 600;
-  static const bool kDefaultGenerateDebugInfo = false;
-  static const bool kDefaultGenerateMiniDebugInfo = true;
-  static const size_t kDefaultInlineMaxCodeUnits = 32;
+  // Default values for parameters set via flags.
+  static constexpr bool kDefaultGenerateDebugInfo = false;
+  static constexpr bool kDefaultGenerateMiniDebugInfo = true;
+  static constexpr size_t kDefaultHugeMethodThreshold = 10000;
+  static constexpr size_t kDefaultInlineMaxCodeUnits = 32;
+  // Token to represent no value set for `inline_max_code_units_`.
   static constexpr size_t kUnsetInlineMaxCodeUnits = -1;
+  // We set a lower inlining threshold for baseline to reduce code size and compilation time. This
+  // cannot be changed via flags.
+  static constexpr size_t kBaselineInlineMaxCodeUnits = 14;
 
   enum class CompilerType : uint8_t {
     kAotCompiler,             // AOT compiler.
@@ -121,16 +124,8 @@ class CompilerOptions final {
     return huge_method_threshold_;
   }
 
-  size_t GetLargeMethodThreshold() const {
-    return large_method_threshold_;
-  }
-
   bool IsHugeMethod(size_t num_dalvik_instructions) const {
     return num_dalvik_instructions > huge_method_threshold_;
-  }
-
-  bool IsLargeMethod(size_t num_dalvik_instructions) const {
-    return num_dalvik_instructions > large_method_threshold_;
   }
 
   size_t GetInlineMaxCodeUnits() const {
@@ -392,7 +387,6 @@ class CompilerOptions final {
 
   CompilerFilter::Filter compiler_filter_;
   size_t huge_method_threshold_;
-  size_t large_method_threshold_;
   size_t inline_max_code_units_;
 
   InstructionSet instruction_set_;

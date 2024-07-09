@@ -21,7 +21,6 @@
 #include "base/mutex.h"
 #include "dex/dex_file.h"
 #include "dex/dex_instruction.h"
-#include "dex/method_reference.h"
 
 /*
  * NOTE: This code is part of the quick compiler. It lives in the runtime
@@ -100,47 +99,23 @@ class InlineMethodAnalyser {
    *
    * @return true if the method is a candidate for inlining, false otherwise.
    */
-  static bool AnalyseMethodCode(ArtMethod* method, InlineMethod* result)
+  static bool AnalyseMethodCode(ArtMethod* method,
+                                const CodeItemDataAccessor* code_item,
+                                InlineMethod* result)
       REQUIRES_SHARED(Locks::mutator_lock_);
-
-  static constexpr bool IsInstructionIGet(Instruction::Code opcode) {
-    return Instruction::IGET <= opcode && opcode <= Instruction::IGET_SHORT;
-  }
-
-  static constexpr bool IsInstructionIPut(Instruction::Code opcode) {
-    return Instruction::IPUT <= opcode && opcode <= Instruction::IPUT_SHORT;
-  }
-
-  static constexpr uint16_t IGetVariant(Instruction::Code opcode) {
-    return opcode - Instruction::IGET;
-  }
-
-  static constexpr uint16_t IPutVariant(Instruction::Code opcode) {
-    return opcode - Instruction::IPUT;
-  }
 
   // Determines whether the method is a synthetic accessor (method name starts with "access$").
-  static bool IsSyntheticAccessor(MethodReference ref);
+  static bool IsSyntheticAccessor(ArtMethod* method) REQUIRES_SHARED(Locks::mutator_lock_);
 
  private:
-  static bool AnalyseMethodCode(const CodeItemDataAccessor* code_item,
-                                const MethodReference& method_ref,
-                                bool is_static,
-                                ArtMethod* method,
-                                InlineMethod* result)
-      REQUIRES_SHARED(Locks::mutator_lock_);
   static bool AnalyseReturnMethod(const CodeItemDataAccessor* code_item, InlineMethod* result);
   static bool AnalyseConstMethod(const CodeItemDataAccessor* code_item, InlineMethod* result);
-  static bool AnalyseIGetMethod(const CodeItemDataAccessor* code_item,
-                                const MethodReference& method_ref,
-                                bool is_static,
-                                ArtMethod* method,
+  static bool AnalyseIGetMethod(ArtMethod* method,
+                                const CodeItemDataAccessor* code_item,
                                 InlineMethod* result)
       REQUIRES_SHARED(Locks::mutator_lock_);
-  static bool AnalyseIPutMethod(const CodeItemDataAccessor* code_item,
-                                const MethodReference& method_ref,
-                                bool is_static,
-                                ArtMethod* method,
+  static bool AnalyseIPutMethod(ArtMethod* method,
+                                const CodeItemDataAccessor* code_item,
                                 InlineMethod* result)
       REQUIRES_SHARED(Locks::mutator_lock_);
 

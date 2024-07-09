@@ -117,10 +117,26 @@ template<typename T> ART_FRIEND_TEST(test_set_name, individual_test)
 // when changing the exported symbols.
 #ifdef NDEBUG
 #define HIDDEN __attribute__((visibility("hidden")))
+#define PROTECTED __attribute__((visibility("protected")))
 #define EXPORT __attribute__((visibility("default")))
 #else
 #define HIDDEN
+#define PROTECTED
 #define EXPORT
 #endif
+
+// Protected symbols must be declared with "protected" visibility attribute when
+// building the library and "default" visibility when referred to from external
+// libraries/binaries. Otherwise, the external code will expect the symbol to be
+// defined locally and fail to link.
+#ifdef BUILDING_LIBART
+#define LIBART_PROTECTED PROTECTED
+#else
+#define LIBART_PROTECTED EXPORT
+#endif
+
+// Some global variables shouldn't be visible outside libraries declaring them.
+// The attribute allows hiding them, so preventing direct access.
+#define ALWAYS_HIDDEN __attribute__((visibility("hidden")))
 
 #endif  // ART_LIBARTBASE_BASE_MACROS_H_

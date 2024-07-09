@@ -290,8 +290,7 @@
   bug: 228441328,
   names: ["test.java.lang.Math.CeilAndFloorTests#nearIntegerTests",
           "test.java.time.chrono.TestEraDisplayName",
-          "test.java.time.format.TestDateTimeFormatterBuilderWithLocale",
-          "test.java.util.TestFormatter"]
+          "test.java.time.format.TestDateTimeFormatterBuilderWithLocale"]
 },
 {
   description: "Fails on armv8 device",

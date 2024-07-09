@@ -19,7 +19,9 @@
 
 #include <iosfwd>
 
-namespace art {
+#include "base/macros.h"
+
+namespace art HIDDEN {
 
 // The various reasons that we might be suspending a thread.
 enum class SuspendReason : char {

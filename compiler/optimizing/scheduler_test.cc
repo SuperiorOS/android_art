@@ -406,15 +406,13 @@ TEST_F(SchedulerTest, ArrayAccessAliasingARM64) {
 #if defined(ART_ENABLE_CODEGEN_arm)
 TEST_F(SchedulerTest, DependencyGraphAndSchedulerARM) {
   CriticalPathSchedulingNodeSelector critical_path_selector;
-  arm::SchedulingLatencyVisitorARM arm_latency_visitor(/*CodeGenerator*/ nullptr);
-  arm::HSchedulerARM scheduler(&critical_path_selector, &arm_latency_visitor);
+  arm::HSchedulerARM scheduler(&critical_path_selector, /*codegen=*/ nullptr);
   TestBuildDependencyGraphAndSchedule(&scheduler);
 }
 
 TEST_F(SchedulerTest, ArrayAccessAliasingARM) {
   CriticalPathSchedulingNodeSelector critical_path_selector;
-  arm::SchedulingLatencyVisitorARM arm_latency_visitor(/*CodeGenerator*/ nullptr);
-  arm::HSchedulerARM scheduler(&critical_path_selector, &arm_latency_visitor);
+  arm::HSchedulerARM scheduler(&critical_path_selector, /*codegen=*/ nullptr);
   TestDependencyGraphOnAliasingArrayAccesses(&scheduler);
 }
 #endif

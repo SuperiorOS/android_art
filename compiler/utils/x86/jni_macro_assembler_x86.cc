@@ -542,7 +542,7 @@ void X86JNIMacroAssembler::DeliverPendingException() {
 }
 
 std::unique_ptr<JNIMacroLabel> X86JNIMacroAssembler::CreateLabel() {
-  return std::unique_ptr<JNIMacroLabel>(new X86JNIMacroLabel());
+  return std::unique_ptr<JNIMacroLabel>(new (asm_.GetAllocator()) X86JNIMacroLabel());
 }
 
 void X86JNIMacroAssembler::Jump(JNIMacroLabel* label) {

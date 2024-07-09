@@ -16,6 +16,9 @@ java_library {
     name: "art-run-test-845-data-image-src-art",
     defaults: ["art-run-test-defaults"],
     srcs: ["src-art/**/*.java"],
+    lint: {
+        baseline_filename: "lint-baseline.xml",
+    },
 }
 
 // Test's Dex code.

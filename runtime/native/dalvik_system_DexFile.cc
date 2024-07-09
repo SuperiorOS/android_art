@@ -49,9 +49,9 @@
 #include "nativehelper/jni_macros.h"
 #include "nativehelper/scoped_local_ref.h"
 #include "nativehelper/scoped_utf_chars.h"
-#include "oat_file.h"
-#include "oat_file_assistant.h"
-#include "oat_file_manager.h"
+#include "oat/oat_file.h"
+#include "oat/oat_file_assistant.h"
+#include "oat/oat_file_manager.h"
 #include "runtime.h"
 #include "scoped_thread_state_change-inl.h"
 #include "string_array_utils.h"
@@ -62,7 +62,7 @@
 #include <sys/system_properties.h>
 #endif  // ART_TARGET_ANDROID
 
-namespace art {
+namespace art HIDDEN {
 
 // Should be the same as dalvik.system.DexFile.ENFORCE_READ_ONLY_JAVA_DCL
 static constexpr uint64_t kEnforceReadOnlyJavaDcl = 218865702;

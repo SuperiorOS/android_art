@@ -24,6 +24,7 @@ import android.os.Build;
 import androidx.annotation.RequiresApi;
 
 import com.android.server.LocalManagerRegistry;
+import com.android.server.art.model.ArtServiceJobInterface;
 
 /**
  * Entry point for the callback from the job scheduler. This class is instantiated by the system
@@ -35,16 +36,21 @@ import com.android.server.LocalManagerRegistry;
 public class BackgroundDexoptJobService extends JobService {
     @Override
     public boolean onStartJob(@NonNull JobParameters params) {
-        return getJob().onStartJob(this, params);
+        return getJob(params.getJobId()).onStartJob(this, params);
     }
 
     @Override
     public boolean onStopJob(@NonNull JobParameters params) {
-        return getJob().onStopJob(params);
+        return getJob(params.getJobId()).onStopJob(params);
     }
 
     @NonNull
-    static BackgroundDexoptJob getJob() {
-        return LocalManagerRegistry.getManager(ArtManagerLocal.class).getBackgroundDexoptJob();
+    static ArtServiceJobInterface getJob(int jobId) {
+        if (jobId == BackgroundDexoptJob.JOB_ID) {
+            return LocalManagerRegistry.getManager(ArtManagerLocal.class).getBackgroundDexoptJob();
+        } else if (jobId == PreRebootDexoptJob.JOB_ID) {
+            return LocalManagerRegistry.getManager(ArtManagerLocal.class).getPreRebootDexoptJob();
+        }
+        throw new IllegalArgumentException("Unknown job ID " + jobId);
     }
 }
